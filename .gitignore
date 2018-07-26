@@ -1,0 +1,8 @@
+node_modules/*
+tmp/*
+db/*
+logs/*
+.DS_STORE
+settings.json
+dump.rdb
+!.gitkeep

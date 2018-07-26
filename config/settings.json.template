@@ -1,0 +1,74 @@
+{
+  // port to listen for requests on.
+  "port" : 3000,
+
+  // host url for odin-portal application
+  "appHost": "http://localhost:4200",
+
+  // host url for odin-portal API
+  "apiHost": "http://localhost:3000",
+
+  // secret phrase/string for sessionId hashing
+  "secret": "VerySecretPhrase!!1",
+
+  // User Password Config
+  "password_settings" : {
+    "allowPassphrases"       : true,
+    "maxLength"              : 32,
+    "minLength"              : 10,
+    "minPhraseLength"        : 20,
+    "minOptionalTestsToPass" : 4,
+  },
+
+  // MongoDB Database Config
+  "dbsettings": {
+    "user": "user",
+    "password": "password123",
+    "database": "local",
+    "address": "localhost",
+    "port": 27017
+  },
+
+  // Redis Database Config
+  "dbSession": {
+    "host": "localhost",
+    "port": 6379
+  },
+
+  // Obsidian Wallet Config
+  "wallet": {
+    "host": "localhost",
+    "port": 8332,
+    "user": "me",
+    "pass": "123"
+  },
+
+  "integrations": {
+    // Email Management
+    "sendgrid": {
+      "token": "SG.me123.you345"
+    },
+    
+    // SMS Management
+    "nexmo": {
+      "key": "123456",
+      "secret": "secret123",
+      "application_id": "go-for-it"
+    },
+
+    // Identity Management
+    "shuftipro": {
+      "api_url": "api.shuftipro.com",
+      "callback_url": "website.com",
+      "client_key": "me123",
+      "secret_key": "you123"
+    }
+  },
+
+  "smtp_settings": {
+    "host": "smtp.sendgrid.net",
+    "port": 465,
+    "username": "me",
+    "password": "me123"
+  }
+}
