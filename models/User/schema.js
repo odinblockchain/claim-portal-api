@@ -28,9 +28,9 @@ const PolicyAcceptance = new Schema({
 const UserSchema = new Schema({
   
   // Unique ID for user account (different from mongoose internal '_id')
-  id: {
-    type: String, unique: true, index: true, default: uuid.generate()
-  },
+  // id: {
+  //   type: String, unique: true, index: true, default: uuid.generate()
+  // },
 
   // Access level for user account USER | MOD | ADMIN
   level: {
