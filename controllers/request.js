@@ -52,8 +52,9 @@ module.exports.verifyEmailCode = (req, res) => {
     Request.validateWithAuth(userId, req.body.type, req.body.code)
     .then((request) => {
       Promise.all([ request.user.validateEmail(), Request.removeRequestsByType(userId, req.body.type) ])
-      .then( ([ emailValidated, emailRequestsRemoved ]) => {
-        return res.json({ status: 'ok' });
+      .then( ([ updatedUser, emailRequestsRemoved ]) => {
+        let token = updatedUser.generateJwt();
+        return res.json({ status: 'ok', token: token });
       }, (err) => {
         let errMsg = (err.message) ? err.message : err;
         debug(`Request Verify Email Code Failed - ${userId} ${req.body.code}\nReason: ${errMsg}`);
@@ -80,8 +81,9 @@ module.exports.verifyEmailHex = (req, res) => {
     let user = request.user;
 
     Promise.all([ request.user.validateEmail(), Request.removeRequestsByType(user._id, req.body.type) ])
-    .then( ([ emailValidated, emailRequestsRemoved ]) => {
-      return res.json({ status: 'ok' });
+    .then( ([ updatedUser, emailRequestsRemoved ]) => {
+      let token = updatedUser.generateJwt();
+      return res.json({ status: 'ok', token: token });
     }, (err) => {
       let errMsg = (err.message) ? err.message : err;
       debug(`Request Verify Email Hex Failed - ${user._id} ${req.body.code}\nReason: ${errMsg}`);

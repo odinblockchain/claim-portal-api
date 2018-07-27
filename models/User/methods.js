@@ -20,6 +20,21 @@ module.exports = function(UserSchema) {
     return this.model('User').find({ email: this.email }, cb);
   };
 
+  UserSchema.methods.accountDetails = function() {
+    let user = this;
+    return new Promise((resolve, reject) => {
+      resolve({
+        phone:            user.phone,
+        email:            user.email,
+        createdAt:        user.created_at,
+        emailVerified:    user.email_verified,
+        privacyAccepted:  user.privacyAccepted.accepted,
+        termsAccepted:    user.termsAccepted.accepted,
+        walletAddress:    user.wallet
+      })
+    });
+  };
+
   /**
    * Generate a JSON Web Token
    * https://jwt.io/
@@ -28,7 +43,7 @@ module.exports = function(UserSchema) {
    * - Append Two-Factor Auth details if applicable
    */
   UserSchema.methods.generateJwt = function() {
-    debug(`Generating JWT - ${this.email}`);
+    debug(`Generating JWT - ${this._id}`);
 
     let expiry = new Date();
     expiry.setDate(expiry.getDate() + 7);
@@ -36,13 +51,18 @@ module.exports = function(UserSchema) {
     let userInformation = {
       auth:   this._id,
       email:  this.email,
+      flags:  {
+        email: this.email_verified
+      },
       exp:    parseInt(expiry.getTime() / 1000)
     };
 
     if (this.tfa_enabled) {
-      debug(`TFA Enabled - ${this.email}`);
+      debug(`TFA Enabled - ${this._id}`);
       userInformation.tfaVerified = false;
     }
+
+    // console.log('USER', userInformation);
 
     return jwt.sign(userInformation, settings.secret);
   };
@@ -89,11 +109,11 @@ module.exports = function(UserSchema) {
         
         Request.create(user, 'emailValidation', emailVerifyHex)
         .then((_hexRequest) => {
-          debug(`Created EmailValidation Request 1/2 - ${this.email}`);
+          debug(`Created EmailValidation Request 1/2 - ${this._id}`);
 
           Request.create(user, 'emailValidation', emailVerifyPin)
           .then((_pinRequest) => {
-            debug(`Created EmailValidation Request 2/2 - ${this.email}`);
+            debug(`Created EmailValidation Request 2/2 - ${this._id}`);
 
             sgMail.setApiKey(settings.integrations.sendgrid.token);
             sgMail.setSubstitutionWrappers('{{', '}}'); // Configure the substitution tag wrappers globally
@@ -619,16 +639,22 @@ module.exports = function(UserSchema) {
 
     let user = this;
     return new Promise((res, rej) => {
-      user.update({
-        $set: {
-          email_verified: true
-        }
-      }, (err, modified) => {
+      user.set({ email_verified: true });
+      user.save((err, updatedUser) => {
         if (err) return rej(err);
-        if (modified && modified.ok !== 1) return rej('USER_NOT_MODIFIED');
-        debug(`User Email Validated - ${this.id}}`);
-        res(true);
+        debug(`User Email Validated - ${updatedUser.id} [${updatedUser.email_verified}]}`);
+        res(updatedUser);
       });
+      // user.update({
+      //   $set: {
+      //     email_verified: true
+      //   }
+      // }, (err, modified) => {
+      //   if (err) return rej(err);
+      //   if (modified && modified.ok !== 1) return rej('USER_NOT_MODIFIED');
+      //   debug(`User Email Validated - ${this.id}}`);
+      //   res(true);
+      // });
     });
   }
 
@@ -659,7 +685,7 @@ module.exports = function(UserSchema) {
    * Invalidate a user's email address
    */
   UserSchema.methods.invalidateEmail = function() {
-    debug(`Invalidating User Email - ${this.id}}`);
+    debug(`Invalidating User Email - ${this._id}`);
 
     let user = this;
     return new Promise((res, rej) => {
@@ -670,7 +696,7 @@ module.exports = function(UserSchema) {
       }, (err, modified) => {
         if (err) return rej(err);
         if (modified && modified.ok !== 1) return rej('NOT_MODIFIED');
-        debug(`User Email Invalidated - ${this.id}}`);
+        debug(`User Email Invalidated - ${this._id}}`);
         res(true);
       });
     });

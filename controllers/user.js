@@ -3,6 +3,21 @@ const mongoose = require('mongoose');
 const User      = mongoose.model('User');
 const debug     = require('debug')('odin-portal:controller:user');
 
+function parseUserAuthHeader(req) {
+  try {
+    let authToken = req.headers['authorization'].split(' ');
+    let token = authToken[1].split('.')[1];
+    let buff = Buffer.from(token, 'base64').toString('binary');
+    console.log('BUFF', buff);
+    
+    return JSON.parse(buff);
+  } catch (err) {
+    debug('Unable to parseUserAuthHeader');
+    console.log(err);
+    return '';
+  }
+}
+
 module.exports.register = (req, res) => {
   debug(`Register User - ${req.body.email}`);
 
@@ -60,6 +75,29 @@ module.exports.login = (req, res) => {
     }
   })(req, res);
 };
+
+module.exports.fetchDetails = (req, res) => {
+  debug(`Fetch User Details`);
+
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+
+  debug(`Fetch User Details -- ${userId}`);
+
+  User.findById(userId)
+  .exec( (err, user) => {
+    if (err)
+      return res.status(401).json({ status: 'error', error: err });
+
+    user.accountDetails()
+    .then((userDetails) => {
+      res.json({ status: 'ok', user: userDetails });
+    });
+  });
+}
 
 module.exports.userRead = (req, res) => {
   debug('Read User');

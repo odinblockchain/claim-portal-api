@@ -138,8 +138,6 @@ UserSchema.pre('save', function(next) {
     bcrypt.hash(user.password, salt, function(err, hash) {
       if (err) return next(err);
 
-      debug(`Hashed password: ${user.password} = ${hash}`);
-
       // override the cleartext password with the hashed one
       user.password = hash;
       next();
@@ -168,7 +166,7 @@ UserSchema.post('save', function(error, doc, next) {
 });
 
 UserSchema.post('save', function(doc) {
-  debug(`Record saved for USER#${doc.id} [${doc.email}] [${doc.updated_at}]`, doc);
+  debug(`Record saved for USER#${doc.id} [${doc.email}] [${doc.updated_at}]`);
 });
 
 

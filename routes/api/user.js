@@ -31,6 +31,7 @@ const UserController = require('../../controllers/user');
  */
 
 router.get('/profile', auth, UserController.userRead);
+router.get('/fetchDetails', auth, UserController.fetchDetails);
 router.post('/', UserController.register);
 
 // router.get('/user', (req, res, next) => {
