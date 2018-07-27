@@ -10,8 +10,6 @@ function validEmail(email) {
 };
 
 module.exports = function(UserSchema) {
-  console.log('USER', typeof UserSchema);
-
   UserSchema.statics.sample = function(foo) {
     let User = this;
     return 'ODIN' + foo;

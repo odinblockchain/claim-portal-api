@@ -2,6 +2,8 @@ const passport = require('passport');
 const mongoose = require('mongoose');
 const User      = mongoose.model('User');
 const debug     = require('debug')('odin-portal:controller:user');
+const AuthIP    = mongoose.model('AuthIP');
+const moment    = require('moment');
 
 function parseUserAuthHeader(req) {
   try {
@@ -40,6 +42,14 @@ module.exports.register = (req, res) => {
       return res.json({ status: 'error', error: err });
     }
 
+    AuthIP.saveActivity(user._id, req.ip)
+    .then((authIp) => debug('Confirmed AuthIp saved'))
+    .catch((err) => {
+      console.log('ERRRRRRR');
+      console.log(err);
+      debug('Confirmed AuthIp issue');
+    });
+
     let token = user.generateJwt();
     user.requireEmailValidation()
     .then((sendGridResult) => {
@@ -55,7 +65,7 @@ module.exports.register = (req, res) => {
 
 module.exports.login = (req, res) => {
   debug(`Login User - ${req.body.email}`);
-  
+
   passport.authenticate('local', (err, user, info) => {
     // If Passport throws/catches an error
     if (err) {
@@ -65,6 +75,14 @@ module.exports.login = (req, res) => {
 
     // If a user is found
     if (user) {
+      AuthIP.saveActivity(user._id, req.ip)
+      .then((authIp) => debug('Confirmed AuthIp saved'))
+      .catch((err) => {
+        console.log('ERRRRRRR');
+        console.log(err);
+        debug('Confirmed AuthIp issue');
+      });
+
       debug(`Login Accepted - ${req.body.email}`);
       let token = user.generateJwt();
       return res.json({ status: 'ok', token: token });
