@@ -3,7 +3,8 @@
  */
 const package         = require('./package.json');
 const createError     = require('http-errors');
-const cors            = require('./config/cors');
+const cors            = require('cors');
+const corsConfig      = require('./config/cors');
 const express         = require('express');
 const path            = require('path');
 const cookieParser    = require('cookie-parser');
@@ -109,6 +110,11 @@ if (env === 'production') {
 }
 
 /**
+ * Set Options
+ */
+app.options('*', cors());
+
+/**
  * Set View Engine
  */
 app.set('views', path.join(__dirname, 'views'));
@@ -118,7 +124,7 @@ app.set('view engine', 'ejs');
  * Set Middleware
  */
 
-app.use(cors);
+app.use(corsConfig);
 
 // Hit logging
 app.use(logger(':status :method :url :res[content-length] - :response-time ms'));
