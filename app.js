@@ -115,6 +115,11 @@ if (env === 'production') {
 app.options('*', cors());
 
 /**
+ * Set Proxy Trust
+ */
+app.enable('trust proxy');
+
+/**
  * Set View Engine
  */
 app.set('views', path.join(__dirname, 'views'));
@@ -124,10 +129,11 @@ app.set('view engine', 'ejs');
  * Set Middleware
  */
 
-app.use(corsConfig);
-
 // Hit logging
 app.use(logger(':status :method :url :res[content-length] - :response-time ms'));
+
+// CORS
+app.use(corsConfig);
 
 // Parse JSON POST
 app.use(express.json());
