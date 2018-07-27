@@ -91,23 +91,23 @@ const apiRouter = require('./routes/api');
 /**
  * Production Only Redirects (www & https)
  */
-if (env === 'production') {
-  app.use(function(req, res, next) {
-    if (req.headers.host.slice(0, 4) === 'www.') {
-      let newHost   = req.headers.host.slice(4);
-      return res.redirect(301, 'https://' + newHost + req.originalUrl);
-    }
+// if (env === 'production') {
+//   app.use(function(req, res, next) {
+//     if (req.headers.host.slice(0, 4) === 'www.') {
+//       let newHost   = req.headers.host.slice(4);
+//       return res.redirect(301, 'https://' + newHost + req.originalUrl);
+//     }
 
-    next();
-  });
+//     next();
+//   });
 
-  app.use(function(req, res, next) {
-    if (!req.secure)
-      return res.redirect('https://' + req.get('Host') + req.originalUrl);
+//   app.use(function(req, res, next) {
+//     if (!req.secure)
+//       return res.redirect('https://' + req.get('Host') + req.originalUrl);
     
-    next();
-  });
-}
+//     next();
+//   });
+// }
 
 /**
  * Set Options
