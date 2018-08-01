@@ -68,6 +68,7 @@
 
     // Metrics Tracking
     "statsd": {
+      "metric_id": "claim_api_staging",
       "enabled": false,
       "host": "localhost",
       "port": 8125
