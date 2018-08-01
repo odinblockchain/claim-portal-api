@@ -79,9 +79,8 @@ module.exports.register = (req, res, next) => {
         level: 'info',
         extra: err
       });
-      console.log(err);
-      return next(err);
-      // return res.json({ status: 'error', error: err });
+      
+      return res.json({ status: 'error', error: err });
     }
 
     AuthIP.saveActivity(user._id, req.ip)
