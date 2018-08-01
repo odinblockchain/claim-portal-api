@@ -1,6 +1,7 @@
 const settings  = require('../../config/');
-const debug     = require('debug')('odin-portal:model:user');
-const request = require('request');
+const debug     = require('debug')('odin-portal:model:user:static');
+const request   = require('request');
+const Raven     = require('raven');
 
 function validEmail(email) {
   var emailRegex1 = /^(([^<>()[\]\\.,;:\s@\"]+(\.[^<>()[\]\\.,;:\s@\"]+)*)|(\".+\"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
@@ -13,6 +14,54 @@ module.exports = function(UserSchema) {
   UserSchema.statics.sample = function(foo) {
     let User = this;
     return 'ODIN' + foo;
+  }
+
+  UserSchema.statics.refreshBalances = function() {
+    debug('Refreshing all user balances');
+    let User = this;
+    return new Promise((resolve, reject) => {
+      User.find({})
+      .exec((err, users) => {
+        if (err) {
+          debug('Unable to refresh balances');
+          console.log(err);
+          return reject(err);
+        }
+
+        let refreshPromises = [];
+        
+        users.map(user => {
+          refreshPromises.push(user.refreshBalance());
+
+          // user.refreshBalance()
+          // .then((user) => {
+          //   debug(`Completed user -- ${user._id}`);
+          // })
+          // .catch((err) => {
+          //   debug(`User issue -- ${user._id}`);
+          // })
+        });
+
+        debug(`Total promises to work: ${refreshPromises.length}`);
+
+        let totalBalances = 0;
+        Promise.all(refreshPromises)
+        .then((users) => {
+          users.map(user => {
+            totalBalances += user.balance;
+            debug(`Completed -- ${user._id} (${user.balance})`);
+          });
+
+          return resolve(totalBalances);
+        })
+        .catch((err) => {
+          debug('Refresh all balances error');
+          console.log(err);
+
+          return reject(err);
+        });
+      });
+    });
   }
 
   UserSchema.statics.validateSignature = function(address, signature, word) {
@@ -34,9 +83,53 @@ module.exports = function(UserSchema) {
           body:     body
         });
 
-        if (typeof body === 'string' && body.match(/invalid address/ig)) return reject('BAD_ADDRESS');
-        if (err || response.statusCode !== 200) return reject('EAUTH');
-        if (body === false) return reject('BAD_SIGNATURE');
+        if ((typeof body === 'string' && body.match(/invalid address/ig)) ||
+            (typeof body.message === 'string' && body.message.match(/invalid address/ig))) {
+          Raven.captureMessage('Validate Signature BAD_ADDRESS', {
+            level: 'info',
+            tags: { metric: 'address_validation' },
+            extra: {
+              address: address
+            }
+          });
+
+          return reject('BAD_ADDRESS');
+        }
+
+        if ((typeof body === 'string' && body.match(/malformed base64/ig)) ||
+            (typeof body.message === 'string' && body.message.match(/malformed base64/ig))) {
+          Raven.captureMessage('Validate Signature BAD_SIGNATURE', {
+            level: 'info',
+            tags: { metric: 'address_validation' },
+            extra: {
+              signature: signature
+            }
+          });
+
+          return reject('BAD_SIGNATURE');
+        }
+
+        if (err || response.statusCode !== 200) {
+          Raven.captureException('Validate Signature BAD_AUTH', {
+            level: 'error',
+            tags: { metric: 'address_validation' },
+            extra: {
+              error: err
+            }
+          });
+
+          return reject('EAUTH');
+        }
+
+        if (body === false) {
+          Raven.captureMessage('Validate Signature INVALID_SIGNATURE', {
+            level: 'info',
+            tags: { metric: 'address_validation' }
+          });
+
+          return reject('BAD_SIGNATURE');
+        }
+
         if (body === true) return resolve(true);
       });
     });

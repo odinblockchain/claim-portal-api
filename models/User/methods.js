@@ -5,7 +5,10 @@ const crypto    = require("crypto");
 const jwt       = require('jsonwebtoken');
 const mongoose  = require('mongoose');
 const Request   = mongoose.model('Request');
-const sgMail = require('@sendgrid/mail');
+const sgMail    = require('@sendgrid/mail');
+const Raven     = require('raven');
+const http      = require('request');
+// const User      = mongoose.model('User');
 
 function generatePin(max) {
   if (typeof max === 'undefined') max = 4;
@@ -26,14 +29,71 @@ module.exports = function(UserSchema) {
       resolve({
         phone:            user.phone,
         email:            user.email,
+        theme:            user.theme,
         createdAt:        user.created_at,
         emailVerified:    user.email_verified,
-        privacyAccepted:  user.privacyAccepted.accepted,
         termsAccepted:    user.termsAccepted.accepted,
-        walletAddress:    user.wallet
+        walletAddress:    user.wallet,
+        addressBalance:   user.balance
       })
     });
   };
+
+  UserSchema.methods.refreshBalance = function() {
+    let user = this;
+    return new Promise((resolve, reject) => {
+      if (user.wallet === '') {
+        debug(`Wallet Address missing or invalid, skipping -- ${user._id}`);
+        return resolve(user);
+      }
+
+      http({ uri: `${settings.balanceApi}/${user.wallet}/balance`, json: true }, (err, response, body) => {
+        // debug('Pull Balance', {
+        //   error:    (err) ? err.message : '',
+        //   response: (response) ? response.statusCode : '',
+        //   body:     body
+        // });
+
+        if (err) {
+          debug('Unable to refresh balance');
+          Raven.captureException('Unable to pull address balance', {
+            tags: { model: 'User' },
+            extra: {
+              error: err,
+              response: response,
+              body: body
+            }
+          });
+          return resolve(user);
+        }
+
+        if (body && body.status !== 'ok')
+          return resolve(user);
+
+        user.model('User').findOneAndUpdate({ _id: user._id }, {
+          $set: {
+            balance: body.balance
+          }
+        }, { new: true })
+        .exec((err, _user) => {
+          if (err) {
+            debug('Unable to save new balance');
+            Raven.captureException('Unable to save address balance', {
+              tags: { model: 'User' },
+              extra: {
+                error: err,
+                body: body
+              }
+            });
+            return resolve(_user);
+          }
+    
+          debug(`Saved Balance - ${user._id}`);
+          return resolve(_user);
+        });
+      });
+    });
+  }
 
   /**
    * Generate a JSON Web Token
@@ -42,19 +102,28 @@ module.exports = function(UserSchema) {
    * - Expiration set 7 days ahead
    * - Append Two-Factor Auth details if applicable
    */
-  UserSchema.methods.generateJwt = function() {
-    debug(`Generating JWT - ${this._id}`);
-
-    let expiry = new Date();
-    expiry.setDate(expiry.getDate() + 7);
+  UserSchema.methods.generateJwt = function(exp) {
+    if (typeof exp === 'undefined') {
+      let expiry = new Date();
+      expiry.setDate(expiry.getDate() + 7);
+      exp = parseInt(expiry.getTime() / 1000);
+      debug(`Generating JWT - ${this._id}`);
+    } else {
+      debug(`Refreshing JWT - ${this._id}`);
+    }
     
     let userInformation = {
-      auth:   this._id,
-      email:  this.email,
+      auth:           this._id,
+      email:          this.email,
+      phone:          this.phone,
+      theme:          this.theme,
+      walletAddress:  this.wallet,
+      addressBalance: this.balance,
       flags:  {
-        email: this.email_verified
+        email:          this.email_verified,
+        termsAccepted:  this.termsAccepted.accepted
       },
-      exp:    parseInt(expiry.getTime() / 1000)
+      exp: exp
     };
 
     if (this.tfa_enabled) {
@@ -62,8 +131,12 @@ module.exports = function(UserSchema) {
       userInformation.tfaVerified = false;
     }
 
-    // console.log('USER', userInformation);
+    if (this.level === 'admin') {
+      debug(`Admin Enabled - ${this._id}`);
+      userInformation.admin = true;
+    }
 
+    // console.log('USER', userInformation);
     return jwt.sign(userInformation, settings.secret);
   };
 
@@ -138,15 +211,41 @@ module.exports = function(UserSchema) {
       
             sgMail.send(msg)
             .then(resolve)
-            .catch(reject);
+            .catch((err) => {
+              Raven.captureException('Unable to deliver Email Validation', {
+                level: 'error',
+                extra: {
+                  code: (err.code) ? err.code : '',
+                  message: (err.message) ? err.message : ''
+                }
+              });
+
+              reject(err);
+            });
           })
           .catch((err) => {
             debug(`Request Email Validation Error 2/2 - ${user.email}`);
+            Raven.captureException('Unable to create Email Validation (pin)', {
+              level: 'error',
+              extra: {
+                code: (err.code) ? err.code : '',
+                message: (err.message) ? err.message : ''
+              }
+            });
+
             reject(err);
           });
         })
         .catch((err) => {
           debug(`Request Email Validation Error 1/2 - ${user.email}`);
+          Raven.captureException('Unable to deliver Email Validation (hex)', {
+            level: 'error',
+            extra: {
+              code: (err.code) ? err.code : '',
+              message: (err.message) ? err.message : ''
+            }
+          });
+
           reject(err);
         });
       })

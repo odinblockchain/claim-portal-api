@@ -71,6 +71,25 @@ const UserSchema = new Schema({
     type: String, default: ''
   },
 
+  balance: {
+    type: Number, default: 0
+  },
+
+  // Themes for Portal
+  /**
+   *  Default   -- #e0e0e0
+   *  Black     -- #1d2323
+   *  Blue      -- #41C0D1
+   *  DarkBlue  -- #00A8B6
+   *  Orange    -- #DD6B40
+   *  Red       -- #CC4F49
+   *  Yellow    -- #C4943F
+   *  Brown     -- #AD6A39
+   */
+  theme: {
+    type: String, default: 'default'
+  },
+
   social: {
     discord: { type: String, default: '' },
     reddit: { type: String, default: '' }

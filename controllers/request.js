@@ -53,13 +53,17 @@ module.exports.verifyEmailCode = (req, res) => {
     .then((request) => {
       Promise.all([ request.user.validateEmail(), Request.removeRequestsByType(userId, req.body.type) ])
       .then( ([ updatedUser, emailRequestsRemoved ]) => {
-        let token = updatedUser.generateJwt();
-        return res.json({ status: 'ok', token: token });
+        
+        updatedUser.refreshBalance()
+        .then((_userRefresh) => {
+          let token = _userRefresh.generateJwt();
+          return res.json({ status: 'ok', token: token });
+        });
+        
       }, (err) => {
         let errMsg = (err.message) ? err.message : err;
         debug(`Request Verify Email Code Failed - ${userId} ${req.body.code}\nReason: ${errMsg}`);
         console.log(err);
-
         return res.json({ status: 'error', message: errMsg });
       });
     })
@@ -82,8 +86,13 @@ module.exports.verifyEmailHex = (req, res) => {
 
     Promise.all([ request.user.validateEmail(), Request.removeRequestsByType(user._id, req.body.type) ])
     .then( ([ updatedUser, emailRequestsRemoved ]) => {
-      let token = updatedUser.generateJwt();
-      return res.json({ status: 'ok', token: token });
+
+      updatedUser.refreshBalance()
+      .then((_userRefresh) => {
+        let token = _userRefresh.generateJwt();
+        return res.json({ status: 'ok', token: token });
+      });
+
     }, (err) => {
       let errMsg = (err.message) ? err.message : err;
       debug(`Request Verify Email Hex Failed - ${user._id} ${req.body.code}\nReason: ${errMsg}`);

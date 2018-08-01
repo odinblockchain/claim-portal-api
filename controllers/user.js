@@ -4,6 +4,8 @@ const User      = mongoose.model('User');
 const debug     = require('debug')('odin-portal:controller:user');
 const AuthIP    = mongoose.model('AuthIP');
 const moment    = require('moment');
+const metrics   = require('../lib/metrics');
+const Raven     = require('raven');
 
 function parseUserAuthHeader(req) {
   try {
@@ -20,17 +22,52 @@ function parseUserAuthHeader(req) {
   }
 }
 
-module.exports.register = (req, res) => {
-  debug(`Register User - ${req.body.email}`);
+module.exports.setTheme = (req, res, next) => {
+  debug(`Set User Theme`);
 
-  console.log(req.body);
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+  let jwtExp = (userDetails.exp || 0);
+  let userTheme = (req.body.theme || 'default');
+
+  debug(`Set User Theme -- ${userId} -- Theme: ${userTheme}`);
+
+  User.findOneAndUpdate({ _id: userId }, {
+    $set: {
+      theme: userTheme
+    }
+  }, { new: true })
+  .exec((err, _user) => {
+    if (err) {
+      debug('Unable to save theme');
+      Raven.captureException('Unable to save theme', {
+        tags: { controller: 'user' },
+        extra: {
+          error: err
+        }
+      });
+
+      return next(err);
+    }
+
+    debug(`Saved Theme - ${_user._id}`);
+
+    let token = _user.generateJwt(jwtExp);
+    return res.json({ status: 'ok', token: token });
+  });
+};
+
+module.exports.register = (req, res, next) => {
+  debug(`Register User - ${req.body.email}`);
 
   let user = new User({
     email:              req.body.email,
     password:           req.body.password,
     wallet:             req.body.walletAddress,
     termsAccepted:      req.body.termsAccepted,
-    privacyAccepted:    req.body.privacyAccepted,
     email_verified:     false,
     wallet_verified:    true
   });
@@ -38,28 +75,38 @@ module.exports.register = (req, res) => {
   user.save((err) => {
     if (err) {
       debug(`Register User Error - ${req.body.email}`);
+      Raven.captureMessage('Register User Error', {
+        level: 'info',
+        extra: err
+      });
       console.log(err);
-      return res.json({ status: 'error', error: err });
+      return next(err);
+      // return res.json({ status: 'error', error: err });
     }
 
     AuthIP.saveActivity(user._id, req.ip)
     .then((authIp) => debug('Confirmed AuthIp saved'))
     .catch((err) => {
-      console.log('ERRRRRRR');
-      console.log(err);
       debug('Confirmed AuthIp issue');
     });
 
-    let token = user.generateJwt();
-    user.requireEmailValidation()
-    .then((sendGridResult) => {
-      console.log('EMAIL VALIDATION SENT');
-      return res.json({ status: 'ok', token: token });
-    })
-    .catch((err) => {
-      console.log('EMAIL VALIDATION ERROR', err);
-      return res.json({ status: 'ok', token: token });
-    })
+    metrics.measurement('registration', req.body.timestampDiff);
+
+    user.refreshBalance()
+    .then((_userRefresh) => {
+      let token = _userRefresh.generateJwt();
+
+      user.requireEmailValidation()
+      .then((sendGridResult) => {
+        debug('Sent Email Validation');
+        return res.json({ status: 'ok', token: token });
+      })
+      .catch((err) => {
+        debug(`Unable to deliver validation email -- ${(err.message) ? err.message : ''}`);
+        return res.json({ status: 'ok', token: token });
+      })
+    });
+    
   });
 };
 
@@ -70,6 +117,10 @@ module.exports.login = (req, res) => {
     // If Passport throws/catches an error
     if (err) {
       debug(`Login Error - ${req.body.email}`);
+      Raven.captureMessage('User Login Error', {
+        level: 'info',
+        extra: err
+      });
       return res.status(404).json({ status: 'error', error: err });
     }
 
@@ -78,14 +129,17 @@ module.exports.login = (req, res) => {
       AuthIP.saveActivity(user._id, req.ip)
       .then((authIp) => debug('Confirmed AuthIp saved'))
       .catch((err) => {
-        console.log('ERRRRRRR');
-        console.log(err);
         debug('Confirmed AuthIp issue');
       });
 
       debug(`Login Accepted - ${req.body.email}`);
-      let token = user.generateJwt();
-      return res.json({ status: 'ok', token: token });
+
+      user.refreshBalance()
+      .then((_userRefresh) => {
+        let token = _userRefresh.generateJwt();
+        
+        return res.json({ status: 'ok', token: token });
+      });
     }
     else {
       debug(`Login Rejected - ${req.body.email} - ${(info.message) ? info.message : 'Unknown'}`);
@@ -113,6 +167,70 @@ module.exports.fetchDetails = (req, res) => {
     user.accountDetails()
     .then((userDetails) => {
       res.json({ status: 'ok', user: userDetails });
+    });
+  });
+}
+
+module.exports.verifySession = (req, res) => {
+  debug(`Verify Session Details`);
+
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth || !userDetails.exp)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+  let jwtExp = (userDetails.exp || 0);
+
+  User.findById(userId)
+  .exec( (err, user) => {
+    if (err) {
+      Raven.captureMessage('Verify Session Rejected', {
+        level: 'info',
+        extra: {
+          error: err
+        }
+      });
+
+      return res.status(401).json({ status: 'error', error: err });
+    }
+    
+    let now = (new Date().getTime() / 1000);
+    if (now >= jwtExp) {
+      return res.status(401).json({ status: 'error', error: 'Expired Session' });
+    }
+
+    let flags = {};
+    if (user.email_verified === false)
+      flags.email_verified = false
+    if (user.level === 'admin')
+      flags.admin = true
+      
+    return res.json({ status: 'ok', flags: flags });
+  });
+}
+
+module.exports.refreshDetails = (req, res) => {
+  debug(`Fetch User Details`);
+
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+  let jwtExp = (userDetails.exp || 0);
+
+  debug(`Refresh User Details -- ${userId} -- EXP: ${jwtExp}`);
+
+  User.findById(userId)
+  .exec( (err, user) => {
+    if (err)
+      return res.status(401).json({ status: 'error', error: err });
+
+    user.refreshBalance()
+    .then((_userRefresh) => {
+      let token = _userRefresh.generateJwt(jwtExp);
+      
+      return res.json({ status: 'ok', token: token });
     });
   });
 }

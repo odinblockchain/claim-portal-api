@@ -13,6 +13,9 @@ const ApiController = require('../../controllers/api');
 const userRouter = require('./user');
 const authRouter = require('./auth');
 const requestRouter = require('./request');
+const metricsRouter = require('./metrics');
+const alertRouter = require('./alert');
+// const eventRouter = require('./event'); // TODO Better Event Metrics
 
 // custom validator objects
 let ValidationError = mongoose.Error.ValidationError;
@@ -38,15 +41,20 @@ router.post('/validateSignature', ApiController.validateSignature);
 router.use('/user', userRouter);
 router.use('/auth', authRouter);
 router.use('/request', requestRouter);
+router.use('/metric', metricsRouter);
+router.use('/alert', alertRouter);
+// router.use('/event', eventRouter); // TODO Release Event Metrics
 
 // error handlers
 // Catch unauthorised errors
 router.use(function (err, req, res, next) {
-  debug('caught error');
-  console.log(err);
   if (err.name === 'UnauthorizedError') {
     res.status(401);
     res.json({ status: 'error', message: `${err.name}:${err.message}` });
+  }
+  else {
+    debug('caught error');
+    next(err);
   }
 });
 

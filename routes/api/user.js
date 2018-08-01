@@ -32,7 +32,10 @@ const UserController = require('../../controllers/user');
 
 router.get('/profile', auth, UserController.userRead);
 router.get('/fetchDetails', auth, UserController.fetchDetails);
+router.get('/refreshDetails', auth, UserController.refreshDetails);
+router.get('/verifySession', auth, UserController.verifySession);
 router.post('/', UserController.register);
+router.post('/setTheme', auth, UserController.setTheme);
 
 // router.get('/user', (req, res, next) => {
 //   User.findOne({ email: 'email2@website.com' })

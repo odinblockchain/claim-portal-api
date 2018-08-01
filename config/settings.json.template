@@ -8,6 +8,8 @@
   // host url for odin-portal API
   "apiHost": "http://localhost:3000",
 
+  "balanceApi" : "https://api.odn.init.run/api/address",
+
   // secret phrase/string for sessionId hashing
   "secret": "VerySecretPhrase!!1",
 
@@ -62,6 +64,18 @@
       "callback_url": "website.com",
       "client_key": "me123",
       "secret_key": "you123"
+    },
+
+    // Metrics Tracking
+    "statsd": {
+      "enabled": false,
+      "host": "localhost",
+      "port": 8125
+    },
+
+    // App Error Tracking
+    "sentry": {
+      "DSN": "SENTRY_RAVEN_DSN"
     }
   },
 

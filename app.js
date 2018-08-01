@@ -23,6 +23,13 @@ const redisClient     = redis.createClient({
   host: settings.dbSession.host,
   port: settings.dbSession.port
 });
+const Raven = require('raven');
+
+// Configure Raven (Sentry)
+Raven.config(settings['integrations']['sentry']['DSN'], {
+  release: package.version,
+  environment: env
+}).install();
 
 // Create list of countries
 let countries    = require('country-data').countries;
@@ -110,14 +117,18 @@ const apiRouter = require('./routes/api');
 // }
 
 /**
- * Set Options
+ * Set Options (if production)
  */
-app.options('*', cors());
+if (env === 'production') {
+  app.options('*', cors());
+}
 
 /**
- * Set Proxy Trust
+ * Set Proxy Trust (if production)
  */
-app.enable('trust proxy');
+if (env === 'production') {
+  app.enable('trust proxy');
+}
 
 /**
  * Set View Engine
@@ -129,11 +140,25 @@ app.set('view engine', 'ejs');
  * Set Middleware
  */
 
+// Raven request handler must be the first middleware
+app.use(Raven.requestHandler());
+
 // Hit logging
 app.use(logger(':status :method :url :res[content-length] - :response-time ms'));
 
-// CORS
-app.use(corsConfig);
+// CORS (if production)
+if (env === 'production') {
+  app.use(corsConfig);
+} else {
+  let devCors = {
+    origin: function (origin, callback) {
+      debug(`ORIGIN CHECK -- ${origin}`);
+      callback(null, true);
+    }
+  }
+
+  app.use(cors(devCors));
+}
 
 // Parse JSON POST
 app.use(express.json());
@@ -183,6 +208,9 @@ app.use(passport.initialize());
 app.use('/api/v1', apiRouter);
 
 
+// Raven error handler must be before any other error middleware
+app.use(Raven.errorHandler());
+
 // 404 middleware
 app.use(function(req, res, next) {
   console.log(`${req.path} 404 Error -- Portal ${req.OdinUser}`)
@@ -192,12 +220,15 @@ app.use(function(req, res, next) {
 // error middleware
 app.use(function(err, req, res, next) {
   // set locals, only providing error in development
-  res.locals.message = err.message;
-  res.locals.error = req.app.get('env') === 'development' ? err : {};
+  // res.locals.message = err.message;
+  // res.locals.error = (env === 'development') ? err : 'sever error occurred';
+
+  let errMessage = (env === 'development') ? ((err.message) ? err.message : 'Server Error') : 'Server Error';
+  debug(`Server Error -- ${errMessage}`);
 
   // render the error page
   res.status(err.status || 500);
-  res.json({ status: 'error', message: (err.message) ? err.message : 'sever error occurred' });
+  res.json({ status: 'error', message: errMessage, env: env, sentry: res.sentry });
 });
 
 module.exports = app;
