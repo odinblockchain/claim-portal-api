@@ -1,10 +1,11 @@
 {
   "name": "odin-claim-portal-api",
-  "version": "0.3.2",
+  "version": "0.3.4",
   "description": "",
   "main": "app.js",
   "scripts": {
-    "start-prod": "PORT=80 NODE_ENV=development ENV=development DEBUG=odin-portal:* forever start bin/www",
+    "start-prod": "PORT=8080 NODE_ENV=production ENV=production DEBUG=odin-portal:* forever start bin/www",
+    "serve-staging": "PORT=80 NODE_ENV=staging ENV=staging DEBUG=odin-portal:* node ./bin/www",
     "serve": "NODE_ENV=development ENV=development DEBUG=odin-portal:*,xxl:* node ./bin/www"
   },
   "author": "Pixxl <manbearpixel@gmail.com>",

@@ -17,6 +17,8 @@ const RequestController = require('../../controllers/request');
 
 router.post('/verify', auth, RequestController.verifyEmailCode);
 router.post('/verifyEmail', RequestController.verifyEmailHex);
+router.get('/tfaCode', RequestController.createTFACode);
+router.post('/tfaCode', RequestController.verifyTFACode);
 
 /**
  * Catch UnauthorizedErrors
@@ -27,6 +29,8 @@ router.use(function (err, req, res, next) {
     res.status(401);
     res.json({ status: 'error', message: `${err.name}:${err.message}` });
   }
+  else
+    next(err);
 });
 
 module.exports = router;

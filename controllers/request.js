@@ -1,8 +1,9 @@
-const passport = require('passport');
-const mongoose = require('mongoose');
-const User = mongoose.model('User');
-const Request = mongoose.model('Request');
+const passport  = require('passport');
+const mongoose  = require('mongoose');
+const User      = mongoose.model('User');
+const Request   = mongoose.model('Request');
 const debug     = require('debug')('odin-portal:controller:request');
+const QRCode    = require('qrcode');
 
 function parseUserAuthHeader(req) {
   try {
@@ -18,11 +19,6 @@ function parseUserAuthHeader(req) {
     return '';
   }
 }
-
-module.exports.sample = (req, res) => {
-  debug(`Sample -- ${req.body.address}`);
-  return res.json({ status: 'ok', message: 'foo' });
-};
 
 module.exports.verifyEmailCode = (req, res) => {
   debug(`Request Verify Email Code -- ${req.body.code}`);
@@ -107,5 +103,70 @@ module.exports.verifyEmailHex = (req, res) => {
     console.log(err);
 
     return res.json({ status: 'error', message: errMsg });
+  });
+};
+
+module.exports.createTFACode = (req, res, next) => {
+  debug(`Request 2FA Code`);
+
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+
+  User
+  .findById(userId)
+  .exec((err, user) => {
+    if (err) return next(err);
+
+    user.setupTFA()
+    .then((secret) => {
+      QRCode.toDataURL(secret.otpauth_url, (err, data_url) => {
+        if (err) return next(err);
+
+        debug(`2FA request and QR created for user:${userId}`);
+        return res.json({ status: 'ok', tfa_qr: data_url, tfa_base: secret.base32 });
+      });
+    })
+    .catch((err) => {
+      console.log('error', err);
+      return next(err);
+    });
+  });
+};
+
+module.exports.verifyTFACode = (req, res, next) => {
+  debug(`Verify 2FA Code`);
+
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+  let jwtExp = (userDetails.exp || 0);
+
+  User
+  .findById(userId)
+  .exec((err, user) => {
+    if (err) return next(err);
+
+    user.verifyTFA(req.body.tfaCode)
+    .then((_user) => {
+      if (!_user) {
+        debug(`2FA REJECTED for user:${userId}`);
+        return res.json({ status: 'error', message: 'invalid_tfa_code' });
+      }
+
+      debug(`2FA ACCEPTED for user:${userId}`);
+
+      let token = _user.generateJwt(jwtExp);
+      return res.json({ status: 'ok', token: token });
+    })
+    .catch((err) => {
+      console.log('error');
+      console.log(err);
+      return next(err);
+    });
   });
 };

@@ -39,7 +39,8 @@ const UserSchema = new Schema({
 
   // Timestamp of request start
   created_at: {
-    type: Number, default: moment().utc()
+    type: Number,
+    default: () => moment().utc()
   },
 
   // Timestamp of any updates done to account

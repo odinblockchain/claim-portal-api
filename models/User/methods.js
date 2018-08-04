@@ -8,6 +8,8 @@ const Request   = mongoose.model('Request');
 const sgMail    = require('@sendgrid/mail');
 const Raven     = require('raven');
 const http      = require('request');
+const speakeasy = require('speakeasy');
+const moment    = require('moment');
 // const User      = mongoose.model('User');
 
 function generatePin(max) {
@@ -99,19 +101,19 @@ module.exports = function(UserSchema) {
    * Generate a JSON Web Token
    * https://jwt.io/
    * 
-   * - Expiration set 7 days ahead
+   * - Expiration set 3 days ahead
    * - Append Two-Factor Auth details if applicable
    */
   UserSchema.methods.generateJwt = function(exp) {
-    if (typeof exp === 'undefined') {
-      let expiry = new Date();
-      expiry.setDate(expiry.getDate() + 7);
-      exp = parseInt(expiry.getTime() / 1000);
-      debug(`Generating JWT - ${this._id}`);
+    let jwtMoment = moment();
+    if (exp) {
+      jwtMoment = moment((exp * 1000));
+      debug(`Refreshing JWT - ${this._id} exp:${exp} date:${jwtMoment}`);
     } else {
-      debug(`Refreshing JWT - ${this._id}`);
+      jwtMoment.add(3, 'days');
+      debug(`Generating JWT - ${this._id} date:${jwtMoment}`);
     }
-    
+
     let userInformation = {
       auth:           this._id,
       email:          this.email,
@@ -123,16 +125,20 @@ module.exports = function(UserSchema) {
         email:          this.email_verified,
         termsAccepted:  this.termsAccepted.accepted
       },
-      exp: exp
+      tasks: {},
+      exp: jwtMoment.unix()
     };
 
     if (this.tfa_enabled) {
-      debug(`TFA Enabled - ${this._id}`);
-      userInformation.tfaVerified = false;
+      debug(`2FA Enabled - ${this._id}`);
+      userInformation.tfaVerified = true;
+    } else {
+      debug(`!TASK -- 2FA - ${this._id}`);
+      userInformation.tasks.tfa = true;
     }
 
     if (this.level === 'admin') {
-      debug(`Admin Enabled - ${this._id}`);
+      debug(`!LEVEL -- ADMIN - ${this._id}`);
       userInformation.admin = true;
     }
 
@@ -309,34 +315,42 @@ module.exports = function(UserSchema) {
    * 
    * - Rejects with an error reason (if available)
    */
-  UserSchema.methods.setupXFA = function() {
+  UserSchema.methods.setupTFA = function() {
     let user = this;
-    let speakeasy = require('speakeasy');
   
     return new Promise((resolve, reject) => {
-      debug(`SETTING UP 2FA`);
+      debug(`Setup TFA for user:${user._id}`);
   
-      var secret = speakeasy.generateSecret({
-        name: 'ODIN Portal'
+      let secret = speakeasy.generateSecret({
+        name: 'ODIN Claim Portal'
       });
       
       if (!secret || !secret.base32 || !secret.otpauth_url) {
-        return reject('MISSING_SECRETS');
+        return reject('generation_failure');
       }
-  
-      debug(secret);
-  
-      user.update({
-        $set: {
-          xfa_enabled:      false,
-          xfa_secret:       '',
-          xfa_secret_tmp:   secret.base32
-        }
-      }, (err, modified) => {
-        if (err) return reject(err);
-        if (modified && modified.ok !== 1) return reject('NOT_MODIFIED');
-  
-        resolve(secret);
+
+      // debug(secret);
+      /**
+       * secret = {
+       *  ascii
+       *  hex
+       *  base32
+       *  otpauth_url
+       * }
+       */
+
+      Request.deleteMany({ user: user._id, type: 'tfaValidation' })
+      .exec((err) => {
+        let request = new Request({
+          user: user._id,
+          type: 'tfaValidation',
+          code: secret.base32
+        });
+
+        request.save((err, _req) => {
+          if (err) return reject(err);
+          resolve(secret);
+        });
       });
     });
   }
@@ -347,53 +361,56 @@ module.exports = function(UserSchema) {
    * 
    * - Rejects with an error reason (if available)
    */
-  UserSchema.methods.verifyXFA = function(xfaToken) {
+  UserSchema.methods.verifyTFA = function(tfaCode) {
     let user = this;
+
     return new Promise((resolve, reject) => {
-      let speakeasy = require('speakeasy');
-  
-      debug(`VALIDATING 2FA`, {
-        secret: user.xfa_secret_tmp,
-        token:  xfaToken
-      });
-  
-      var verified = speakeasy.totp.verify({
-        secret:     user.xfa_secret_tmp,
-        encoding:   'base32',
-        token:      xfaToken
-      });
-      
-      user.update({
-        $set: {
-          xfa_enabled:      verified,
-          xfa_secret:       (verified) ? user.xfa_secret_tmp : '',
-          xfa_secret_tmp:   (verified) ? '' : user.xfa_secret_tmp,
-        }
-      }, (err, modified) => {
+
+      Request.findOne({ user: user._id, type: 'tfaValidation' })
+      .exec((err, request) => {
         if (err) return reject(err);
-        if (modified && modified.ok !== 1) return reject('NOT_MODIFIED');
-  
-        if (verified) return resolve(true);
-        return reject('INVALID');
+
+        let verified = speakeasy.totp.verify({
+          secret:     request.code,
+          encoding:   'base32',
+          token:      tfaCode
+        });
+
+        debug(`Verifying 2FA for user:${user._id} -- ?:${verified}`);
+
+        if (verified) {
+          mongoose.model('User').findOneAndUpdate({ _id: user._id }, {
+            tfa_enabled: true,
+            tfa_secret: request.code
+          }, { new: true })
+          .exec((err, updatedUser) => {
+            if (err) return reject(err);
+
+            Request.deleteMany({ user: updatedUser._id, type: 'tfaValidation' })
+            .exec((err) => {
+              if (err) debug('Unable to remove TFA Requests');
+
+              return resolve(updatedUser);
+            });
+          });
+        } else{
+          return resolve(false);
+        }
       });
     });
   }
   
-  UserSchema.methods.authXFA = function(xfaToken) {
+  UserSchema.methods.authTFA = function(tfaCode) {
     let user = this;
     return new Promise((resolve, reject) => {
-      let speakeasy = require('speakeasy');
-  
-      debug(`VALIDATING 2FA`, {
-        secret: user.xfa_secret,
-        token:  xfaToken
-      });
-  
-      var verified = speakeasy.totp.verify({
-        secret:     user.xfa_secret,
+
+      let verified = speakeasy.totp.verify({
+        secret:     user.tfa_secret,
         encoding:   'base32',
-        token:      xfaToken
+        token:      tfaCode
       });
+
+      debug(`Verifying 2FA for user:${user._id} -- ?:${verified}`);
   
       if (verified) return resolve(true);
       return reject('INVALID');

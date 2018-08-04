@@ -166,7 +166,7 @@ UserSchema.post('save', function(error, doc, next) {
 });
 
 UserSchema.post('save', function(doc) {
-  debug(`Record saved for USER#${doc.id} [${doc.email}] [${doc.updated_at}]`);
+  debug(`SAVED user:${doc._id} [${doc.email}] [${doc.updated_at}]`);
 });
 
 
@@ -224,7 +224,7 @@ UserSchema.post('update', function(error, doc, next) {
 
     return next(error);
   } else {
-    debug(`Record saved for USER#${doc.id} [${doc.email}] [${doc.updated_at}]`, doc);
+    debug(`UPDATED user:${doc._id} [${doc.email}] [${doc.updated_at}]`, doc);
     next(error);
   }
 });

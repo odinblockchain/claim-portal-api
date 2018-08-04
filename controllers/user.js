@@ -79,7 +79,7 @@ module.exports.register = (req, res, next) => {
         level: 'info',
         extra: err
       });
-      
+
       return res.json({ status: 'error', error: err });
     }
 
@@ -125,20 +125,37 @@ module.exports.login = (req, res) => {
 
     // If a user is found
     if (user) {
-      AuthIP.saveActivity(user._id, req.ip)
-      .then((authIp) => debug('Confirmed AuthIp saved'))
-      .catch((err) => {
-        debug('Confirmed AuthIp issue');
-      });
 
-      debug(`Login Accepted - ${req.body.email}`);
+      if (user.tfa_enabled) {
+        debug(`User has TFA enabled, verify TFA Code - ${user.email}`);
 
-      user.refreshBalance()
-      .then((_userRefresh) => {
-        let token = _userRefresh.generateJwt();
-        
-        return res.json({ status: 'ok', token: token });
-      });
+        if (!req.body.tfaCode) {
+          return res.json({ status: 'error', tfa_enabled: true });
+        }
+
+        user.authTFA(req.body.tfaCode)
+        .then((success) => {
+          AuthIP.saveActivity(user._id, req.ip)
+          .then((authIp) => debug('Confirmed AuthIp saved'))
+          .catch((err) => {
+            debug('Confirmed AuthIp issue');
+          });
+    
+          debug(`Login Accepted - ${req.body.email}`);
+    
+          user.refreshBalance()
+          .then((_userRefresh) => {
+            let token = _userRefresh.generateJwt();
+            
+            return res.json({ status: 'ok', token: token });
+          });
+        })
+        .catch((rejected) => {
+          debug(`Login Rejected Bad 2FA - ${req.body.email}`);
+
+          return res.json({ status: 'error', tfa_enabled: true, tfa_rejected: true });
+        })
+      }
     }
     else {
       debug(`Login Rejected - ${req.body.email} - ${(info.message) ? info.message : 'Unknown'}`);
@@ -224,6 +241,10 @@ module.exports.refreshDetails = (req, res) => {
   .exec( (err, user) => {
     if (err)
       return res.status(401).json({ status: 'error', error: err });
+
+    if (!user) {
+      return res.json({ status: 'error', message: 'account_not_found' })
+    }
 
     user.refreshBalance()
     .then((_userRefresh) => {
