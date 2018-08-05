@@ -126,8 +126,24 @@ module.exports.login = (req, res) => {
     // If a user is found
     if (user) {
 
-      if (user.tfa_enabled) {
-        debug(`User has TFA enabled, verify TFA Code - ${user.email}`);
+      if (!user.tfa_enabled) {
+        debug(`User has TFA DISABLED - ${user.email}`);
+
+        AuthIP.saveActivity(user._id, req.ip)
+        .then((authIp) => debug('Login, AuthIp Activity Saved'))
+        .catch((err) => { debug('Login, AuthIp Activity Issue'); });
+  
+        debug(`Login Accepted - ${req.body.email}`);
+  
+        user.refreshBalance()
+        .then((_userRefresh) => {
+          let token = _userRefresh.generateJwt();
+          
+          return res.json({ status: 'ok', token: token });
+        });
+      }
+      else {
+        debug(`User has TFA DISABLED, verify TFA Code - ${user.email}`);
 
         if (!req.body.tfaCode) {
           return res.json({ status: 'error', tfa_enabled: true });
