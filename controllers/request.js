@@ -212,9 +212,10 @@ module.exports.forgotPasswordCancel = (req, res, next) => {
 
 
 module.exports.resetPasswordAuthenticate = (req, res, next) => {
-  debug('ResetPassword, Authenticate?');
-
+  debug(`ResetPassword, Authenticate?`);
   let forgotPasswordCode = req.query.token;
+
+  debug(`ResetPassword Query: ${forgotPasswordCode}`);
   Request.findOne({ code: forgotPasswordCode, type: 'passwordReset' })
   .exec((err, request) => {
     if (err) return next(err);

@@ -1,9 +1,10 @@
 // *** main dependencies *** //
-const cors  = require('cors');
-const debug = require('debug')('odin-portal:app:cors');
+const cors      = require('cors');
+const debug     = require('debug')('odin-portal:app:cors');
+const settings  = require('./');
 
 // *** cors setup *** //
-let whitelist   = [ 'http://claim.odinblockchain.org', 'https://claim.odinblockchain.org' ];
+let whitelist   = settings['cors']['whitelist'];
 let corsOptions = {
   origin: function (origin, callback) {
     // callback(null, true);
@@ -16,5 +17,7 @@ let corsOptions = {
     }
   }
 }
+
+debug(`CORS Whitelisted :: ${whitelist.join(', ')}`);
 
 module.exports = cors(corsOptions);

@@ -13,6 +13,14 @@
   // secret phrase/string for sessionId hashing
   "secret": "VerySecretPhrase!!1",
 
+  // list of websites/ips which should be allowed to make requests
+  "cors" : {
+    "whitelist": [
+      "http://claim.odinblockchain.org",
+      "https://claim.odinblockchain.org"
+    ]
+  },
+  
   // User Password Config
   "password_settings" : {
     "allowPassphrases"       : true,
