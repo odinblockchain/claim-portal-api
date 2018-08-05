@@ -41,6 +41,9 @@ module.exports = function(UserSchema) {
     });
   };
 
+  /**
+   * Make Third-Party API call to refresh/load a user's balance.
+   */
   UserSchema.methods.refreshBalance = function() {
     let user = this;
     return new Promise((resolve, reject) => {
@@ -276,35 +279,75 @@ module.exports = function(UserSchema) {
     });
   }
   
-  UserSchema.methods.sendPasswordResetEmail = function(resetToken, requestIp) {
-    let crypto  = require('crypto');
-    let user    = this;
+  /**
+   * Generates a random HEX code for user to validate a "Reset Password" request.
+   * Removes any previous requests for password resetting.
+   * @param {string} requestIp 
+   */
+  UserSchema.methods.sendResetPasswordEmail = function(requestIp) {
+    debug(`Send ResetPassword - user:${this.email}`);
+
+    let user      = this;
+    let resetHex  = crypto.randomBytes(32).toString('hex');
   
     return new Promise((resolve, reject) => {
-      if (resetToken === '') {
-        debug('resetToken is empty for user, aborting');
-        return reject('missing_token');
-      }
-  
-      debug(`Sending Password Reset Email To: ${user.email} [${resetToken}]`);
-  
-      sgMail.setApiKey(settings.integrations.sendgrid.token);
-      sgMail.setSubstitutionWrappers('{{', '}}'); // Configure the substitution tag wrappers globally
-      let msg = {
-        to:             user.email,
-        from:           'do-not-reply@loki.chat',
-        subject:        'ODIN - Password Reset Request',
-        templateId:     '8468c0b3-252d-48aa-8876-001f1ae3ebe0',
-        substitutions:  {
-          request_ip_address:         (requestIp) ? requestIp : '',
-          reset_password_url:         `${settings.appHost}/reset-password-auth?auth=${resetToken}`,
-          cancel_password_reset_url:  `${settings.appHost}/reset-password-cancel?auth=${resetToken}`,
-        }
-      };
+
+      Request.deleteMany({ user: user._id, type: 'passwordReset' })
+      .exec((err) => {
+        if (err) debug('Request removal error', err);
+
+        Request.create(user, 'passwordReset', resetHex)
+        .then((_hexRequest) => {
+          debug(`Created ResetPassword Request - user:${this.email}`);
+
+          sgMail.setApiKey(settings.integrations.sendgrid.token);
+          sgMail.setSubstitutionWrappers('{{', '}}'); // Configure the substitution tag wrappers globally
+          let msg = {
+            personalizations: [{
+              to: [{ email: user.email }],
+              subject: 'ODIN Claim Portal - Reset Acccount Password',
+              dynamic_template_data: {
+                cancel_reset_request_link: `${settings.appHost}/forgot-password-cancel?token=${resetHex}`,
+                request_ip_address: requestIp,
+                reset_request_link: `${settings.appHost}/forgot-password-reset?token=${resetHex}`,
+              }
+            }],
+            template_id: 'd-3b286cacdb954a0cb49e2f35101f7f55',
+            from: {
+              name: 'ODIN Claim Portal',
+              email: 'do-not-reply@obsidianplatform.com'
+            }
+          };
     
-      sgMail.send(msg)
-      .then(resolve)
-      .catch(reject);
+          debug(`ResetPassword Email Sending - user:${user.email} [${resetHex}]`);
+    
+          sgMail.send(msg)
+          .then(resolve)
+          .catch((err) => {
+            Raven.captureException('Unable to deliver ResetPassword email', {
+              level: 'error',
+              extra: {
+                code: (err.code) ? err.code : '',
+                message: (err.message) ? err.message : ''
+              }
+            });
+
+            reject(err);
+          });
+        })
+        .catch((err) => {
+          debug(`Request Reset Password Email Failed - user:${user.email}`);
+          Raven.captureException('Unable to create Reset Password Request (hex)', {
+            level: 'error',
+            extra: {
+              code: (err.code) ? err.code : '',
+              message: (err.message) ? err.message : ''
+            }
+          });
+
+          reject(err);
+        });
+      });
     });
   };
   

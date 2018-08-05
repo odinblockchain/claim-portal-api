@@ -170,3 +170,138 @@ module.exports.verifyTFACode = (req, res, next) => {
     });
   });
 };
+
+module.exports.forgotPassword = (req, res, next) => {
+  debug('ForgotPassword');
+
+  let email = req.body.email;
+  if (email === '' || !email.length) {
+    return res.json({ status: 'error', error: 'No email supplied' });
+  }
+
+  User.findOne({ email: email })
+  .exec((err, user) => {
+    if (err) {
+      debug('ForgotPassword, Error', (err.message) ? err.message : err);
+      return next(err);
+    }
+
+    if (user) {
+      user.sendResetPasswordEmail(req.ip)
+      .then((email) => { return res.json({ status: 'ok' }) })
+      .catch((err) => { return next(err) })
+    } else {
+      debug('User Not Found');
+      return res.json({ status: 'ok' });
+    }
+  })
+};
+
+module.exports.forgotPasswordCancel = (req, res, next) => {
+  debug('ForgotPassword, Cancel?');
+
+  let forgotPasswordCode = req.query.token;
+  Request.deleteMany({ code: forgotPasswordCode, type: 'passwordReset' })
+  .exec((err) => {
+    if (err) return next(err);
+
+    debug('ForgotPassword, WIPED');
+    return res.json({ status: 'ok' });
+  });
+};
+
+
+module.exports.resetPasswordAuthenticate = (req, res, next) => {
+  debug('ResetPassword, Authenticate?');
+
+  let forgotPasswordCode = req.query.token;
+  Request.findOne({ code: forgotPasswordCode, type: 'passwordReset' })
+  .exec((err, request) => {
+    if (err) return next(err);
+
+    if (!request) return next(new Error('Forgot Password Request :: Not Found'));
+    
+    debug('ResetPassword, ALLOW');
+    return res.json({ status: 'ok' });
+  });
+};
+
+// TODO: DRY
+module.exports.resetPassword = (req, res, next) => {
+  debug('ResetPassword');
+
+  let newPassword = req.body.password;
+  let resetToken  = req.body.token;
+  let tfaCode     = req.body.tfaCode;
+  
+  Request.findOne({ code: resetToken, type: 'passwordReset' })
+  .populate('user')
+  .exec((err, request) => {
+    if (err) return next(err);
+
+    if (!request) return next(new Error('Forgot Password Request :: Not Found'));
+    if (!request.user) return next(new Error('Forgot Password Request :: Missing User'));
+
+    if (request.user.tfa_enabled) {
+      debug(`ResetPassword, 2FA REQUIRED - user:${request.user.email}`);
+
+      if (!tfaCode)
+        return res.status(401).json({ status: 'error', tfa_enabled: true });
+
+      request.user.authTFA(tfaCode)
+      .then((success) => {
+        debug(`ResetPassword, 2FA ACCEPTED - user:${request.user.email}`);
+
+        request.user.password = newPassword;
+        request.user.save((err, savedUser) => {
+          if (err) {
+            let _errs = [];
+            if (err.errors) {
+              for (let e in err.errors) {
+                let errStr = (err.errors[e].message && err.errors[e].message) ? `[${err.errors[e].kind}] ${err.errors[e].message}` : '...';
+                _errs.push(errStr);
+              }
+            }
+
+            return res.json({ status: 'error', errors: err.errors });
+          }
+
+          debug(`ResetPassword, Password Updated - user:${savedUser.email}`);
+
+          Request.removeRequestsByType(savedUser._id, 'passwordReset')
+          .then((success) => { return res.json({ status: 'ok' }) })
+          .catch((err) => { debug(err); return res.json({ status: 'ok' }); });
+        });
+      })
+      .catch((rejected) => {
+        debug(`ResetPassword, 2FA REJECTED - user:${request.user.email}`);
+
+        return res.status(401).json({ status: 'error', tfa_enabled: true, tfa_rejected: true });
+      });
+    } 
+    else {
+      debug(`ResetPassword - user:${request.user.email}`);
+
+      request.user.password = newPassword;
+      request.user.save((err, savedUser) => {
+        if (err) {
+          let _errs = [];
+          if (err.errors) {
+            for (let e in err.errors) {
+              let errStr = (err.errors[e].message && err.errors[e].message) ? `[${err.errors[e].kind}] ${err.errors[e].message}` : '...';
+              _errs.push(errStr);
+            }
+          }
+
+          return res.json({ status: 'error', errors: err.errors });
+        }
+
+        debug(`ResetPassword, Password Updated - user:${savedUser.email}`);
+
+        Request.removeRequestsByType(savedUser._id, 'passwordReset')
+        .then((success) => { return res.json({ status: 'ok' }) })
+        .catch((err) => { debug(err); return res.json({ status: 'ok' }); });
+      });
+    }
+  });
+};

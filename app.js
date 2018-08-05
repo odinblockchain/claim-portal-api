@@ -152,7 +152,7 @@ if (env === 'production') {
 } else {
   let devCors = {
     origin: function (origin, callback) {
-      debug(`ORIGIN CHECK -- ${origin}`);
+      // debug(`ORIGIN CHECK -- ${origin}`);
       callback(null, true);
     }
   }
