@@ -4,6 +4,7 @@ const User      = mongoose.model('User');
 const Request   = mongoose.model('Request');
 const debug     = require('debug')('odin-portal:controller:request');
 const QRCode    = require('qrcode');
+const moment    = require('moment');
 
 function parseUserAuthHeader(req) {
   try {
@@ -20,6 +21,57 @@ function parseUserAuthHeader(req) {
   }
 }
 
+module.exports.resendVerifyEmail = (req, res, next) => {
+  debug(`Resend Verify Email`);
+
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+
+  User
+  .findById(userId)
+  .exec((err, user) => {
+    if (err) {
+      let errMsg = (err.message) ? err.message : err;
+      debug(`Resend Verify Email Issue - ${errMsg}`);
+      return next(err);
+    }
+
+    if (!user) {
+      debug(`Resend Verify Email - UserNotFound`);
+      return res.status(403).json({ status: 'error', message: 'user_not_found' });
+    }
+
+    Request.getLatestRequestByType(userId, 'emailValidation')
+    .then((request) => {
+      let now = moment().utc();
+      let minuteDiff = now.diff(request.createdAt, 'minutes');
+
+      debug(`Latest Email Verification Request -- ${minuteDiff} minute(s) ago | user:${userId}`);
+
+      if (minuteDiff >= 5) {
+        Request.removeRequestsByType(userId, 'emailValidation')
+        .then((removed) => {
+
+          user.requireEmailValidation()
+          .then((sendGridResult) => {
+            debug('Resent Email Validation');
+
+            return res.json({ status: 'ok' });
+          })
+          .catch(next);
+        })
+        .catch(next);
+      }
+      else {
+        return res.json({ status: 'error', error: 'resend_buffer' });
+      }
+    });
+  });
+};
+
 module.exports.verifyEmailCode = (req, res) => {
   debug(`Request Verify Email Code -- ${req.body.code}`);
 
@@ -31,7 +83,7 @@ module.exports.verifyEmailCode = (req, res) => {
 
   User
   .findById(userId)
-  .exec(((err, user) => {
+  .exec((err, user) => {
     if (err) {
       let errMsg = (err.message) ? err.message : err;
       debug(`Request Verify Email Code Issue - ${req.body.code} - ${errMsg}`);
@@ -70,7 +122,7 @@ module.exports.verifyEmailCode = (req, res) => {
 
       return res.json({ status: 'error', message: errMsg });
     });
-  }));
+  });
 };
 
 module.exports.verifyEmailHex = (req, res) => {

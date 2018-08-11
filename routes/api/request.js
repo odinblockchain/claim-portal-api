@@ -17,10 +17,14 @@ const RequestController = require('../../controllers/request');
 
 router.post('/verify', auth, RequestController.verifyEmailCode);
 router.post('/verifyEmail', RequestController.verifyEmailHex);
+router.get('/resendVerifyEmail', auth, RequestController.resendVerifyEmail);
+
 router.get('/tfaCode', RequestController.createTFACode);
 router.post('/tfaCode', RequestController.verifyTFACode);
+
 router.post('/forgotPassword', RequestController.forgotPassword);
 router.get('/forgotPasswordCancel', RequestController.forgotPasswordCancel);
+
 router.get('/resetPassword', RequestController.resetPasswordAuthenticate);
 router.post('/resetPassword', RequestController.resetPassword);
 

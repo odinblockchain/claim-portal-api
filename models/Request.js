@@ -107,7 +107,6 @@ RequestSchema.statics.removeRequestsByType = function(userId, type) {
 
   let Request = this;
   return new Promise((resolve, reject) => {
-
     Request
     .deleteMany({ user: userId, type: type })
     .exec((err, request) => {
@@ -122,5 +121,27 @@ RequestSchema.statics.removeRequestsByType = function(userId, type) {
     });
   });
 };
+
+RequestSchema.statics.getLatestRequestByType = function(userId, type) {
+  debug(`Fetching latest request by type - ${userId} ${type}`);
+
+  let Request = this;
+  return new Promise((resolve, reject) => {
+
+    Request
+    .findOne({ user: userId, type: type })
+    .sort({ 'createdAt' : -1 })
+    .exec((err, request) => {
+      if (err) {
+        debug(`Latest Request Fetch Error - ${userId} ${type}`);
+        console.log(err);
+        return reject(err);
+      }
+
+      debug(`Latest Request Fetch Success - ${userId} ${type}`);
+      return resolve(request);
+    });
+  });
+}
 
 module.exports = mongoose.model('Request', RequestSchema);
