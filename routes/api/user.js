@@ -34,6 +34,7 @@ router.get('/profile', auth, UserController.userRead);
 router.get('/fetchDetails', auth, UserController.fetchDetails);
 router.get('/refreshDetails', auth, UserController.refreshDetails);
 router.get('/verifySession', auth, UserController.verifySession);
+router.delete('/tfa', auth, UserController.deleteTFA);
 router.post('/', UserController.register);
 router.post('/setTheme', auth, UserController.setTheme);
 

@@ -291,3 +291,32 @@ module.exports.userRead = (req, res) => {
     });
   }
 };
+
+module.exports.deleteTFA = (req, res, next) => {
+  debug('Reset TFA');
+
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+  let jwtExp = (userDetails.exp || 0);
+
+  debug(`Reset User TFA | user:${userId} , exp:${jwtExp}`);
+
+  User.findById(userId)
+  .exec( (err, user) => {
+    if (err) return next(err);
+    if (!user) return next(new Error('Unauthorized')); 
+    
+    if (user.tfa_enabled === false)
+      return res.json({ status: 'error', message: 'not_enabled' });
+    else
+      user.resetTFACode()
+      .then((_user) => {
+        let token = _user.generateJwt(jwtExp);
+        return res.json({ status: 'ok', token: token });
+      })
+      .catch(next);
+  });
+}

@@ -126,6 +126,7 @@ module.exports = function(UserSchema) {
       addressBalance: this.balance,
       flags:  {
         email:          this.email_verified,
+        phone:          this.phone_verified,
         termsAccepted:  this.termsAccepted.accepted
       },
       tasks: {},
@@ -276,6 +277,32 @@ module.exports = function(UserSchema) {
         debug('user reset password token cleared');
         resolve(true);
       });
+    });
+  }
+
+  UserSchema.methods.resetTFACode = function() {
+    let user = this;
+  
+    return new Promise((resolve, reject) => {
+
+      user.tfa_enabled = false;
+      user.tfa_secret = '';
+      user.save((err, _user) => {
+        if (err) return reject(err);
+        if (!_user) return reject(new Error('Unable to save updated user details'));
+        return resolve(_user);
+      });
+      // user.update({
+      //   $set: {
+      //     tfa_enabled: false,
+      //     tfa_secret: ''
+      //   }
+      // }, (err, modified) => {
+      //   if (err) return reject(err);
+      //   if (modified && modified.ok !== 1) return reject('NOT_MODIFIED');
+      //   debug('reset TFA Code');
+      //   resolve(true);
+      // });
     });
   }
   
