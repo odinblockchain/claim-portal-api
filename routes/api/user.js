@@ -37,7 +37,7 @@ router.get('/verifySession', auth, UserController.verifySession);
 router.delete('/tfa', auth, UserController.deleteTFA);
 router.post('/', UserController.register);
 router.post('/setTheme', auth, UserController.setTheme);
-
+router.post('/changePassword', UserController.changePassword);
 // router.get('/user', (req, res, next) => {
 //   User.findOne({ email: 'email2@website.com' })
 //   .populate('auth_ips')

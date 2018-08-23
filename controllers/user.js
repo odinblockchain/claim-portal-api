@@ -320,3 +320,83 @@ module.exports.deleteTFA = (req, res, next) => {
       .catch(next);
   });
 }
+
+// TODO: DRY
+module.exports.changePassword = (req, res, next) => {
+  debug('ChangePassword');
+
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+  let jwtExp = (userDetails.exp || 0);
+
+  debug(`Change User Password | user:${userId} , exp:${jwtExp}`);
+
+  User.findById(userId)
+  .exec( (err, user) => {
+    if (err) return next(err);
+    if (!user) return next(new Error('Unauthorized')); 
+    
+    let newPassword = req.body.password;
+    let tfaCode     = req.body.tfaCode;
+
+    if (user.tfa_enabled) {
+      debug(`Change User Password, 2FA REQUIRED - user:${user.email}`);
+
+      if (!tfaCode)
+        return res.status(401).json({ status: 'error', tfa_enabled: true });
+
+      user.authTFA(tfaCode)
+      .then((success) => {
+        debug(`Change User Password, 2FA ACCEPTED - user:${user.email}`);
+
+        user.password = newPassword;
+        user.save((err, savedUser) => {
+          if (err) {
+            let _errs = [];
+            if (err.errors) {
+              for (let e in err.errors) {
+                let errStr = (err.errors[e].message && err.errors[e].message) ? `[${err.errors[e].kind}] ${err.errors[e].message}` : '...';
+                _errs.push(errStr);
+              }
+            }
+
+            return res.json({ status: 'error', errors: err.errors });
+          }
+
+          debug(`Change User Password, Password Updated - user:${savedUser.email}`);
+
+          return res.json({ status: 'ok' });
+        });
+      })
+      .catch((rejected) => {
+        debug(`Change User Password, 2FA REJECTED - user:${user.email}`);
+
+        return res.status(401).json({ status: 'error', tfa_enabled: true, tfa_rejected: true });
+      });
+    }
+    else {
+      debug(`Change User Password - user:${user.email}`);
+
+      user.password = newPassword;
+      user.save((err, savedUser) => {
+        if (err) {
+          let _errs = [];
+          if (err.errors) {
+            for (let e in err.errors) {
+              let errStr = (err.errors[e].message && err.errors[e].message) ? `[${err.errors[e].kind}] ${err.errors[e].message}` : '...';
+              _errs.push(errStr);
+            }
+          }
+
+          return res.json({ status: 'error', errors: err.errors });
+        }
+
+        debug(`Change User Password, Password Updated - user:${savedUser.email}`);
+        return res.json({ status: 'ok' });
+      });
+    }
+  });
+}
