@@ -22,6 +22,9 @@ router.get('/resendVerifyEmail', auth, RequestController.resendVerifyEmail);
 router.get('/tfaCode', RequestController.createTFACode);
 router.post('/tfaCode', RequestController.verifyTFACode);
 
+router.post('/smsCreate', auth, RequestController.createSMSRequest);
+router.post('/smsVerify', auth, RequestController.verifySMSRequest);
+
 router.post('/forgotPassword', RequestController.forgotPassword);
 router.get('/forgotPasswordCancel', RequestController.forgotPasswordCancel);
 

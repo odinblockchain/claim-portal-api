@@ -1,15 +1,17 @@
-const settings  = require('../../config/');
-const debug     = require('debug')('odin-portal:model:user:method');
-const bcrypt    = require('bcryptjs');
-const crypto    = require("crypto");
-const jwt       = require('jsonwebtoken');
-const mongoose  = require('mongoose');
-const Request   = mongoose.model('Request');
-const sgMail    = require('@sendgrid/mail');
-const Raven     = require('raven');
-const http      = require('request');
-const speakeasy = require('speakeasy');
-const moment    = require('moment');
+const settings        = require('../../config/');
+const debug           = require('debug')('odin-portal:model:user:method');
+const bcrypt          = require('bcryptjs');
+const crypto          = require("crypto");
+const jwt             = require('jsonwebtoken');
+const mongoose        = require('mongoose');
+const Request         = mongoose.model('Request');
+const sgMail          = require('@sendgrid/mail');
+const Raven           = require('raven');
+const http            = require('request');
+const speakeasy       = require('speakeasy');
+const moment          = require('moment');
+const Nexmo           = require('nexmo');
+const BlockedNumbers  = require('../../lib/blockedNumbers');
 // const User      = mongoose.model('User');
 
 function generatePin(max) {
@@ -120,6 +122,7 @@ module.exports = function(UserSchema) {
     let userInformation = {
       auth:           this._id,
       email:          this.email,
+      country_code:   this.country_code,
       phone:          this.phone,
       theme:          this.theme,
       walletAddress:  this.wallet,
@@ -140,6 +143,9 @@ module.exports = function(UserSchema) {
       debug(`!TASK -- 2FA - ${this._id}`);
       userInformation.tasks.tfa = true;
     }
+
+    if (!this.phone_verified)
+      userInformation.tasks.phone = true;
 
     if (this.level === 'admin') {
       debug(`!LEVEL -- ADMIN - ${this._id}`);
@@ -575,8 +581,39 @@ module.exports = function(UserSchema) {
     });
   }
   
+  UserSchema.methods.setPhone = function(countryCode, phoneNumber) {
+    let user  = this;
+    // let blockedNumbers = settings.integrations.nexmo.blocked_numbers || [];
+
+    debug(`Saving country:${countryCode} phone:${phoneNumber} to user:${user.email}`);
+
+    return new Promise((resolve, reject) => {
+      let fullNumber = `${countryCode}${phoneNumber}`;
+      debug(`${fullNumber} in ${BlockedNumbers.length}`);
+      if (BlockedNumbers.indexOf(fullNumber) !== -1) return reject('blocked_number');
+
+      mongoose.model('User')
+      .findOne({ phone: phoneNumber })
+      .exec((err, match) => {
+        if (err) return reject(err);
+        if (match && user.email !== match.email) return reject('duplicate_phone');
+        
+        mongoose.model('User')
+        .findOneAndUpdate({ _id: user._id }, {
+          country_code: countryCode,
+          phone: phoneNumber,
+          phone_verified: false
+        }, { new: true })
+        .exec((err, updatedUser) => {
+          if (err) return reject(err);
+  
+          resolve(updatedUser);
+        });
+      });
+    })
+  }
+
   UserSchema.methods.sendSMSAuth = function() {
-    let Nexmo = require('nexmo');
     var nexmo = new Nexmo({
       apiKey:         settings.integrations.nexmo.key,
       apiSecret:      settings.integrations.nexmo.secret
@@ -587,81 +624,105 @@ module.exports = function(UserSchema) {
     let user = this;
   
     return new Promise((resolve, reject) => {    
-      const pin   = generatePin();
+      const pin   = generatePin(6);
       const from  = '12018903094';
-      const to    = user.phone;
+      const to    = user.phoneNumber;
       const text  = `Your ODIN verification code is ${pin}`;
+
+      Request.deleteMany({ user: user._id, type: 'phoneValidation' })
+      .exec((err) => {
+        if (err) debug('Request removal error', err);
+
+        Request.create(user, 'phoneValidation', pin)
+        .then((_pinRequest) => {
+          debug(`Created PhoneValidation Request - user:${user.email} phone:${user.phone}`);
+
+          nexmo.message.sendSms(from, to, text, (err, result) => {
+            if (err) {
+              debug('SMS Auth Request Err', err);
+              return reject(err);
+            }
       
-      nexmo.message.sendSms(from, to, text, (err, result) => {
-        if (err) {
-          debug('SMS Auth Request Err', err);
-          return reject(err);
-        }
-  
-        debug('SMS Result', result);
-  
-        /**
-         *  {
-         *    'message-count': '1',
-              messages: [
-                {
-                  to: '13125506948',
-                  'message-id': '0B000000E170D22C',
-                  status: '0',
-                  'remaining-balance': '1.95860000',
-                  'message-price': '0.00570000',
-                  network: '310004'
+            debug('SMS Result', result);
+
+            if (result && Number(result.messages[0]['remaining-balance']) <= 3) {
+              let balance = Number(result.messages[0]['remaining-balance']);
+              debug(`TRIGGER WARNING -- Nexmo Balance LOW ${balance}`);
+              Raven.captureMessage('SMS Nexmo Balance Low', {
+                level: 'warning',
+                logger: 'User.Methods.sendSMSAuth',
+                extra: {
+                  balance: balance
                 }
-              ]
+              });
             }
-         */
-  
-        if(result && result.messages[0].status == '0') {
-          user.update({
-            $set: {
-              phone_verified: false,
-              phone_verification_token: pin + ''
+      
+            /**
+             *  {
+             *    'message-count': '1',
+                  messages: [
+                    {
+                      to: '13125506948',
+                      'message-id': '0B000000E170D22C',
+                      status: '0',
+                      'remaining-balance': '1.95860000',
+                      'message-price': '0.00570000',
+                      network: '310004'
+                    }
+                  ]
+                }
+            */
+      
+            if (result && result.messages[0].status == '0') {
+              user.update({
+                $set: {
+                  phone_verified: false
+                }
+              }, (err, modified) => {
+                if (err) return reject(err);
+                if (modified && modified.ok !== 1) return reject('NOT_MODIFIED');
+                resolve(pin);
+              });
+            } else {
+              reject(result.error_text ? result.error_text : 'NO_RESPONSE');
             }
-          }, (err, modified) => {
-            if (err) return reject(err);
-            if (modified && modified.ok !== 1) return reject('NOT_MODIFIED');
-            resolve(pin);
           });
-        } else {
-          reject(result.error_text ? result.error_text : 'NO_RESPONSE');
-        }
+        });
       });
     });
   }
   
   UserSchema.methods.verifySMSAuth = function(pin) {
     let user = this;
-    pin = pin + '';
+    pin = `${pin}`;
   
     return new Promise((resolve, reject) => {
-  
-      const sent_pin = user.phone_verification_token + '';
-      if (sent_pin === '') {
-        return reject('NO_PIN_SENT');
-      }
-  
-      debug(`VERIFYING SMS AUTH ... USER: [${pin}] SYS: [${sent_pin}]`);
-  
-      const valid_auth = !!(sent_pin === pin);
-  
-      debug(`VALID? ... ${valid_auth}`);
-  
-      user.update({
-        $set: {
-          phone_verified: valid_auth,
-          phone_verification_token: ''
-        }
-      }, (err, modified) => {
+
+      Request.findOne({ user: user._id, type: 'phoneValidation' })
+      .exec((err, request) => {
         if (err) return reject(err);
-        if (modified && modified.ok !== 1) return reject('NOT_MODIFIED');
-        debug('UPDATED PHONE VERIFICATION STATUS FOR USER');
-  
-        resolve(valid_auth);
+
+        if (!request) return reject('request_not_found');
+
+        debug(`Verifying SMS Auth for user:${user.email} ... PIN:${pin} Code:${request.code}`);
+
+        if (pin === request.code) {
+          mongoose.model('User').findOneAndUpdate({ _id: user._id }, {
+            phone_verified: true
+          }, { new: true })
+          .exec((err, updatedUser) => {
+            if (err) return reject(err);
+
+            Request.deleteMany({ user: updatedUser._id, type: 'phoneValidation' })
+            .exec((err) => {
+              if (err) debug('Unable to remove phoneValidation Requests');
+              return resolve(updatedUser);
+            });
+          });
+        }
+        else {
+          return reject('invalid_pin');
+        }
       });
     });
   }

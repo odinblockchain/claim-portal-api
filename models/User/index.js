@@ -52,6 +52,11 @@ UserSchema.virtual('updated_at_full').get(function() {
   return moment(this.updated_at).format('MMMM Do YYYY'); 
 });
 
+UserSchema.virtual('phoneNumber').get(function() {
+  let phone = `${this.country_code}${this.phone}`.replace(/\D/g, '');
+  return phone;
+});
+
 // Remove password for toJSON to protect accidental password leaks
 UserSchema.set('toJSON', {
   getters: true,
@@ -63,7 +68,7 @@ UserSchema.set('toJSON', {
     delete ret['__v'];
     return ret;
   }
-})
+});
 
 
 // Validate email prior to saving

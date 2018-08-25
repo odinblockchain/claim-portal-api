@@ -53,6 +53,10 @@ const UserSchema = new Schema({
    */
 
   // Phone number for user (Used for notifications, security)
+  country_code: {
+    type: String, default: ''
+  },
+
   phone: {
     type: String, default: ''
   },

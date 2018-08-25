@@ -36,11 +36,14 @@ let countries    = require('country-data').countries;
 let countryCodes = [];
 Object.values(countries).filter(c => !!(c.status === 'assigned')).forEach(element => {
   let codeIndex = countryCodes.findIndex(c => !!(c.name == element.name));
-  // if (codeIndex !== -1)
-    // console.log('SKIPPING', element.name, codeIndex);
-  // else
+
   if (codeIndex === -1)
-    countryCodes.push({ name: element.name, code: element.alpha2 });
+    countryCodes.push({
+      name: element.name,
+      countryCode: element.alpha3,
+      shortCode: element.alpha2,
+      callingCode: element.countryCallingCodes[0]
+    });
 });
 
 // map((c) => {

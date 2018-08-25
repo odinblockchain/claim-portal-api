@@ -37,6 +37,18 @@ router.use((err, req, res, next) => {
 // general API routes
 router.post('/validateSignature', ApiController.validateSignature);
 
+router.get('/countryCodes', (req, res, next) => {
+  let commonCodes   = ['BR', 'CN', 'FR', 'DE', 'IN', 'IR', 'JP', 'RU', 'ES', 'GB', 'US'];
+  let countryCodes  = req.app.locals.countryCodes;
+  let commonCountries = countryCodes.filter(country => (commonCodes.indexOf(country.shortCode) !== -1));
+
+  res.json({
+    status: 'ok',
+    commonCodes: commonCountries,
+    countryCodes: req.app.locals.countryCodes
+  });
+});
+
 // implement API routes
 router.use('/user', userRouter);
 router.use('/auth', authRouter);

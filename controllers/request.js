@@ -72,6 +72,109 @@ module.exports.resendVerifyEmail = (req, res, next) => {
   });
 };
 
+
+/**
+ * Phone Verification Routes
+ */
+module.exports.createSMSRequest = (req, res, next) => {
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+  debug(`Request Create SMS Code -- user:${userId}`);
+
+  Request.getLatestRequestByType(userId, 'phoneValidation')
+  .then((request) => {
+    console.log('request?', request);
+    let now, requestTime;
+
+    if (request) {
+      now = moment().utc();
+      requestTime = moment(request.createdAt);
+      requestTime.add(3, 'minutes');
+
+      let minuteDiff = now.diff(request.createdAt, 'minutes');
+      
+      debug(`Request SMS Code exists -- ${minuteDiff} minutes old`);
+
+      if (minuteDiff < 3)
+        return res.json({
+          status:       'error',
+          timeDelay:    (3 - minuteDiff),
+          unixCreated:  now.unix(),
+          unixExpires:  requestTime.unix()
+        });
+    }
+
+    User
+    .findById(userId)
+    .exec((err, user) => {
+      user.setPhone(req.body.countryCode, req.body.phoneNumber)
+      .then((updatedUser) => {
+        debug(`Phone set! ${updatedUser.phoneNumber} ... ${updatedUser.country_code} ${updatedUser.phone}`);
+
+
+        updatedUser.sendSMSAuth()
+        .then((pin) => {
+          debug(`Sent Pin!`);
+          now = moment().utc();
+          requestTime = moment().utc();
+          requestTime.add(3, 'minutes');
+          
+          res.json({
+            status:       'ok',
+            timeDelay:    3,
+            unixCreated:  now.unix(),
+            unixExpires:  requestTime.unix()
+          });
+        })
+        .catch(next);
+      })
+      .catch((err) => {
+        if (err === 'duplicate_phone' || err === 'blocked_number')
+          res.json({ status: 'error', message: err });
+        else
+          next(err);
+      });
+    });
+    // res.json({ status: 'ok', userId: userId });
+  });
+}
+
+module.exports.verifySMSRequest = (req, res, next) => {
+  debug(`Request Verify SMS Code -- ${req.body.code}`);
+
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+  let jwtExp = (userDetails.exp || 0);
+
+  User
+  .findById(userId)
+  .exec((err, user) => {
+    user.verifySMSAuth(req.body.pin)
+    .then((_user) => {
+
+      let token = _user.generateJwt(jwtExp);
+      return res.json({ status: 'ok', token: token });
+    })
+    .catch((err) => {
+      if (err === 'request_not_found' || err === 'invalid_pin')
+        return res.json({ status: 'error', message: err });
+      else
+        return next(err);
+    })
+  });
+}
+
+
+/**
+ * Email Verification Routes
+ */
+
 module.exports.verifyEmailCode = (req, res) => {
   debug(`Request Verify Email Code -- ${req.body.code}`);
 
@@ -158,6 +261,11 @@ module.exports.verifyEmailHex = (req, res) => {
   });
 };
 
+
+/**
+ * Two-Factor Authentication Routes
+ */
+
 module.exports.createTFACode = (req, res, next) => {
   debug(`Request 2FA Code`);
 
@@ -222,6 +330,11 @@ module.exports.verifyTFACode = (req, res, next) => {
     });
   });
 };
+
+
+/**
+ * Password Reset routes
+ */
 
 module.exports.forgotPassword = (req, res, next) => {
   debug('ForgotPassword');
