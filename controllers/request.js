@@ -86,7 +86,7 @@ module.exports.createSMSRequest = (req, res, next) => {
 
   Request.getLatestRequestByType(userId, 'phoneValidation')
   .then((request) => {
-    console.log('request?', request);
+    // console.log('request?', request);
     let now, requestTime;
 
     if (request) {
@@ -114,7 +114,6 @@ module.exports.createSMSRequest = (req, res, next) => {
       .then((updatedUser) => {
         debug(`Phone set! ${updatedUser.phoneNumber} ... ${updatedUser.country_code} ${updatedUser.phone}`);
 
-
         updatedUser.sendSMSAuth()
         .then((pin) => {
           debug(`Sent Pin!`);
@@ -132,7 +131,7 @@ module.exports.createSMSRequest = (req, res, next) => {
         .catch(next);
       })
       .catch((err) => {
-        if (err === 'duplicate_phone' || err === 'blocked_number')
+        if (err === 'duplicate_phone' || err === 'blocked_number' || err === 'max_attempts')
           res.json({ status: 'error', message: err });
         else
           next(err);
@@ -162,7 +161,7 @@ module.exports.verifySMSRequest = (req, res, next) => {
       return res.json({ status: 'ok', token: token });
     })
     .catch((err) => {
-      if (err === 'request_not_found' || err === 'invalid_pin')
+      if (err === 'request_not_found' || err === 'invalid_pin' || err === 'max_attempts')
         return res.json({ status: 'error', message: err });
       else
         return next(err);

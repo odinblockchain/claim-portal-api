@@ -5,6 +5,7 @@ const crypto          = require("crypto");
 const jwt             = require('jsonwebtoken');
 const mongoose        = require('mongoose');
 const Request         = mongoose.model('Request');
+const Flag            = mongoose.model('Flag');
 const sgMail          = require('@sendgrid/mail');
 const Raven           = require('raven');
 const http            = require('request');
@@ -74,8 +75,15 @@ module.exports = function(UserSchema) {
           return resolve(user);
         }
 
+        console.log(body);
+
         if (body && body.status !== 'ok')
           return resolve(user);
+
+        // Track balance snapshots
+        let _previousBalance    = user.balance;
+        let _newBalance         = body.balance;
+        let _balanceDifference  = (Number(_previousBalance) - Number(_newBalance));
 
         user.model('User').findOneAndUpdate({ _id: user._id }, {
           $set: {
@@ -95,8 +103,25 @@ module.exports = function(UserSchema) {
             return resolve(_user);
           }
     
-          debug(`Saved Balance - ${user._id}`);
-          return resolve(_user);
+          debug(`Saved Balance - user:${user._id}`);
+
+          if ( _balanceDifference >= 10000 ) {
+            Flag.addFlag(user._id, 'balanceRefresh', 'balance_removal', {
+              previousBalance: _previousBalance,
+              newBalance: _newBalance,
+              difference: _balanceDifference
+            })
+            .then((added) => {
+              resolve(_user);
+            })
+            .catch((err) => {
+              debug(`Unable to save flag for user:${user._id}`);
+              resolve(_user);
+            });
+          }
+          else {
+            return resolve(_user);
+          }
         });
       });
     });
@@ -583,33 +608,64 @@ module.exports = function(UserSchema) {
   
   UserSchema.methods.setPhone = function(countryCode, phoneNumber) {
     let user  = this;
-    // let blockedNumbers = settings.integrations.nexmo.blocked_numbers || [];
-
     debug(`Saving country:${countryCode} phone:${phoneNumber} to user:${user.email}`);
 
     return new Promise((resolve, reject) => {
-      let fullNumber = `${countryCode}${phoneNumber}`;
-      debug(`${fullNumber} in ${BlockedNumbers.length}`);
-      if (BlockedNumbers.indexOf(fullNumber) !== -1) return reject('blocked_number');
 
-      mongoose.model('User')
-      .findOne({ phone: phoneNumber })
-      .exec((err, match) => {
-        if (err) return reject(err);
-        if (match && user.email !== match.email) return reject('duplicate_phone');
+      Flag.findFlags(user._id, 'phoneValidation')
+      .then((flags) => {
+        debug(`user:${user._id} has ${flags.length} flags for setting/verifying a phone`);
+
+        if (flags.length >= 5) {
+          debug(`user:${user._id} has reached the maximum attempts for setting/verifying a phone`);
+          return reject('max_attempts');
+        }
+
+        let fullNumber = `${countryCode}${phoneNumber}`;
+        debug(`${fullNumber} in ${BlockedNumbers.length}`);
+        if (BlockedNumbers.indexOf(fullNumber) !== -1) {
+          Flag.addFlag(user._id, 'phoneValidation', 'blocked_number', { number: fullNumber })
+          .then((added) => {
+            reject('blocked_number');
+          })
+          .catch((err) => {
+            debug(`Unable to save flag for user:${user._id}`);
+            reject(err);
+          });
+        }
+        else {
+          mongoose.model('User')
+          .findOne({ phone: phoneNumber })
+          .exec((err, match) => {
+            if (err) return reject(err);
+
+            if (match && user.email !== match.email) {
+              Flag.addFlag(user._id, 'phoneValidation', 'duplicate_number', { number: fullNumber })
+              .then((added) => {
+                reject('duplicate_phone');
+              })
+              .catch((err) => {
+                debug(`Unable to save flag for user:${user._id}`);
+                reject(err);
+              });
+            }
+            else {
+              mongoose.model('User')
+              .findOneAndUpdate({ _id: user._id }, {
+                phone:          phoneNumber,
+                country_code:   countryCode,
+                phone_verified: false
+              }, { new: true })
+              .exec((err, updatedUser) => {
+                if (err) return reject(err);
         
-        mongoose.model('User')
-        .findOneAndUpdate({ _id: user._id }, {
-          country_code: countryCode,
-          phone: phoneNumber,
-          phone_verified: false
-        }, { new: true })
-        .exec((err, updatedUser) => {
-          if (err) return reject(err);
-  
-          resolve(updatedUser);
-        });
-      });
+                resolve(updatedUser);
+              });
+            }
+          });
+        }
+      })
+      .catch(reject);
     })
   }
 
@@ -704,25 +760,43 @@ module.exports = function(UserSchema) {
 
         if (!request) return reject('request_not_found');
 
-        debug(`Verifying SMS Auth for user:${user.email} ... PIN:${pin} Code:${request.code}`);
+        Flag.findFlags(user._id, 'phoneValidation')
+        .then((flags) => {
+          debug(`user:${user._id} has ${flags.length} flags for setting/verifying a phone`);
 
-        if (pin === request.code) {
-          mongoose.model('User').findOneAndUpdate({ _id: user._id }, {
-            phone_verified: true
-          }, { new: true })
-          .exec((err, updatedUser) => {
-            if (err) return reject(err);
+          if (flags.length >= 5) {
+            debug(`user:${user._id} has reached the maximum attempts for setting/verifying a phone`);
+            return reject('max_attempts');
+          }
 
-            Request.deleteMany({ user: updatedUser._id, type: 'phoneValidation' })
-            .exec((err) => {
-              if (err) debug('Unable to remove phoneValidation Requests');
-              return resolve(updatedUser);
+          debug(`Verifying SMS Auth for user:${user.email} ... PIN:${pin} Code:${request.code}`);
+
+          if (pin === request.code) {
+            mongoose.model('User').findOneAndUpdate({ _id: user._id }, {
+              phone_verified: true
+            }, { new: true })
+            .exec((err, updatedUser) => {
+              if (err) return reject(err);
+
+              Request.deleteMany({ user: updatedUser._id, type: 'phoneValidation' })
+              .exec((err) => {
+                if (err) debug('Unable to remove phoneValidation Requests');
+                return resolve(updatedUser);
+              });
             });
-          });
-        }
-        else {
-          return reject('invalid_pin');
-        }
+          }
+          else {
+            Flag.addFlag(user._id, 'phoneValidation', 'invalid_pin', { number: `+${user.phoneNumber}` })
+            .then((added) => {
+              reject('invalid_pin');
+            })
+            .catch((err) => {
+              debug(`Unable to save flag for user:${user._id}`);
+              reject(err);
+            });
+          }
+        })
+        .catch(reject);
       });
     });
   }
