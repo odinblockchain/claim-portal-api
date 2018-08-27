@@ -15,6 +15,7 @@ const session         = require('express-session');
 const settings        = require('./config/');
 const passport        = require('passport');
 const db              = require('./lib/database');
+const countries       = require('country-data').countries;
 const passportConfig  = require('./lib/passport');
 const env             = process.env.NODE_ENV || 'development';
 const redis           = require('redis');
@@ -32,7 +33,6 @@ Raven.config(settings['integrations']['sentry']['DSN'], {
 }).install();
 
 // Create list of countries
-let countries    = require('country-data').countries;
 let countryCodes = [];
 Object.values(countries).filter(c => !!(c.status === 'assigned')).forEach(element => {
   let codeIndex = countryCodes.findIndex(c => !!(c.name == element.name));
@@ -44,6 +44,13 @@ Object.values(countries).filter(c => !!(c.status === 'assigned')).forEach(elemen
       shortCode: element.alpha2,
       callingCode: element.countryCallingCodes[0]
     });
+});
+
+// Sort counties based on their name, not country codes
+countryCodes = countryCodes.sort((a, b) => {
+  if(a.name < b.name) return -1;
+  if(a.name > b.name) return 1;
+  return 0;
 });
 
 // map((c) => {
