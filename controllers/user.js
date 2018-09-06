@@ -112,11 +112,9 @@ module.exports.register = (req, res, next) => {
       return res.json({ status: 'error', error: err });
     }
 
-    AuthIP.saveActivity(user._id, req.ip)
-    .then((authIp) => debug('Confirmed AuthIp saved'))
-    .catch((err) => {
-      debug('Confirmed AuthIp issue');
-    });
+    AuthIP.saveActivity(user, req.ip)
+    .then((authStatus) =>  debug('Register, AuthIp Activity Saved') )
+    .catch((err) => debug('Register, AuthIp Activity Issue') );
 
     metrics.measurement('registration', req.body.timestampDiff);
 
@@ -139,7 +137,7 @@ module.exports.register = (req, res, next) => {
 };
 
 module.exports.login = (req, res) => {
-  debug(`Login User - ${req.body.email}`);
+  debug(`Login - user:${req.body.email}`);
 
   passport.authenticate('local', (err, user, info) => {
     // If Passport throws/catches an error
@@ -156,23 +154,27 @@ module.exports.login = (req, res) => {
     if (user) {
 
       if (!user.tfa_enabled) {
-        debug(`User has TFA DISABLED - ${user.email}`);
+        debug(`User has 2FA DISABLED - user:${user.email}`);
 
-        AuthIP.saveActivity(user._id, req.ip)
-        .then((authIp) => debug('Login, AuthIp Activity Saved'))
-        .catch((err) => { debug('Login, AuthIp Activity Issue'); });
-  
-        debug(`Login Accepted - ${req.body.email}`);
-  
-        user.refreshBalance()
-        .then((_userRefresh) => {
-          let token = _userRefresh.generateJwt();
-          
-          return res.json({ status: 'ok', token: token });
+        user.notificationEnabled('email.newlocation')
+        .then((status) => {
+
+          AuthIP.saveActivity(user, req.ip)
+          .then((authStatus) =>  debug('Login, AuthIp Activity Saved') )
+          .catch((err) => debug('Login, AuthIp Activity Issue') );
+    
+          debug(`Login Accepted - user:${req.body.email}`);
+    
+          user.refreshBalance()
+          .then((_userRefresh) => {
+            let token = _userRefresh.generateJwt();
+            
+            return res.json({ status: 'ok', token: token });
+          });
         });
       }
       else {
-        debug(`User has TFA DISABLED, verify TFA Code - ${user.email}`);
+        debug(`User has 2FA ENABLED, require 2FA - user:${user.email}`);
 
         if (!req.body.tfaCode) {
           return res.json({ status: 'error', tfa_enabled: true });
@@ -180,11 +182,10 @@ module.exports.login = (req, res) => {
 
         user.authTFA(req.body.tfaCode)
         .then((success) => {
-          AuthIP.saveActivity(user._id, req.ip)
-          .then((authIp) => debug('Confirmed AuthIp saved'))
-          .catch((err) => {
-            debug('Confirmed AuthIp issue');
-          });
+
+          AuthIP.saveActivity(user, req.ip)
+          .then((authStatus) =>  debug('Confirmed, AuthIp Activity Saved') )
+          .catch((err) => debug('Confirmed, AuthIp Activity Issue') );
     
           debug(`Login Accepted - ${req.body.email}`);
     

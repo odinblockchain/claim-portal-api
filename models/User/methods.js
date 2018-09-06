@@ -6,6 +6,7 @@ const jwt             = require('jsonwebtoken');
 const mongoose        = require('mongoose');
 const Request         = mongoose.model('Request');
 const Flag            = mongoose.model('Flag');
+const Notification    = mongoose.model('Notification');
 const sgMail          = require('@sendgrid/mail');
 const Raven           = require('raven');
 const http            = require('request');
@@ -200,6 +201,67 @@ module.exports = function(UserSchema) {
       bcrypt.compare(candidatePassword, user.password, (err, isMatch) => {
         if (err || !isMatch) return reject(err);
         resolve(true);
+      });
+    });
+  };
+
+  UserSchema.methods.notificationEnabled = function(notificationKey) {
+    let user = this;
+    debug(`Checking for notification [${notificationKey}] - user:${user._id}`);
+
+    return new Promise((resolve, reject) => {
+      Notification.fetchUserNotifications(user)
+      .then((notifications) => {
+        if (!notifications) return resolve(false);
+        
+        let status = false;
+        try {
+          notificationKey = notificationKey.split('.');
+          status = notifications[notificationKey[0]][notificationKey[1]]
+        } catch (e) { }
+
+        resolve(status);
+      })
+      .catch(reject);
+    });
+  };
+
+  UserSchema.methods.notifyNewLogin = function(ipAddress) {
+    let user = this;
+    debug(`Notify User of New Login [${ipAddress}] - user:${user._id}`);
+
+    return new Promise((resolve, reject) => {
+      sgMail.setApiKey(settings.integrations.sendgrid.token);
+      sgMail.setSubstitutionWrappers('{{', '}}'); // Configure the substitution tag wrappers globally
+      let msg = {
+        personalizations: [{
+          to: [{ email: user.email }],
+          subject: 'New Login Detected - ODIN Claim Portal',
+          dynamic_template_data: {
+            detected_ip_address: ipAddress
+          }
+        }],
+        template_id: 'd-516d85e885fd4bca8b2c7f52980a06a8',
+        from: {
+          name: 'ODIN Claim Portal',
+          email: 'do-not-reply@obsidianplatform.com'
+        }
+      };
+
+      debug(`Sending New Login Email - user:${user._id}`);
+
+      sgMail.send(msg)
+      .then(resolve)
+      .catch((err) => {
+        Raven.captureException('Unable to deliver New Login Email', {
+          level: 'error',
+          extra: {
+            code: (err.code) ? err.code : '',
+            message: (err.message) ? err.message : ''
+          }
+        });
+
+        reject(err);
       });
     });
   };
