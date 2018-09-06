@@ -3,7 +3,7 @@ const Schema    = mongoose.Schema;
 const debug     = require('debug')('odin-portal:model:request');
 
 /**
- * Schema for User Identities
+ * Schema for User Requests
  */
 const RequestSchema = new Schema({
   user: { type: Schema.Types.ObjectId, ref: 'User' },

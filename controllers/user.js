@@ -1,11 +1,12 @@
-const passport = require('passport');
-const mongoose = require('mongoose');
-const User      = mongoose.model('User');
-const debug     = require('debug')('odin-portal:controller:user');
-const AuthIP    = mongoose.model('AuthIP');
-const moment    = require('moment');
-const metrics   = require('../lib/metrics');
-const Raven     = require('raven');
+const passport      = require('passport');
+const mongoose      = require('mongoose');
+const User          = mongoose.model('User');
+const debug         = require('debug')('odin-portal:controller:user');
+const AuthIP        = mongoose.model('AuthIP');
+const Notification  = mongoose.model('Notification');
+const moment        = require('moment');
+const metrics       = require('../lib/metrics');
+const Raven         = require('raven');
 
 function parseUserAuthHeader(req) {
   try {
@@ -20,6 +21,34 @@ function parseUserAuthHeader(req) {
     console.log(err);
     return '';
   }
+}
+
+function escape_string(str) {
+  if (str === true || str === 'true') return true;
+  else if (str === false || str === 'false') return false;
+
+  return str.replace(/[\0\x08\x09\x1a\n\r"'\\\%]/g, function (char) {
+    switch (char) {
+      case "\0":
+          return "\\0";
+      case "\x08":
+          return "\\b";
+      case "\x09":
+          return "\\t";
+      case "\x1a":
+          return "\\z";
+      case "\n":
+          return "\\n";
+      case "\r":
+          return "\\r";
+      case "\"":
+      case "'":
+      case "\\":
+      case "%":
+          return "\\"+char; // prepends a backslash to backslash, percent,
+                            // and double/single quotes
+    }
+  });
 }
 
 module.exports.setTheme = (req, res, next) => {
@@ -318,6 +347,56 @@ module.exports.deleteTFA = (req, res, next) => {
         return res.json({ status: 'ok', token: token });
       })
       .catch(next);
+  });
+}
+
+module.exports.setNotification = (req, res, next) => {
+  debug('SetNotification');
+
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+  let notificationKey   = escape_string(req.body.preferenceKey);
+  let notificationValue = escape_string(req.body.preferenceValue);
+
+  debug(`Set Notification for User | user:${userId} [${notificationKey}][${notificationValue}]`);
+
+  User.findById(userId)
+  .exec( (err, user) => {
+    if (err) return next(err);
+    if (!user) return next(new Error('Unauthorized'));
+
+    Notification.setUserNotification(user, notificationKey, notificationValue)
+    .then((notifications) => {
+      return res.json({ status: 'ok', preferences: notifications });
+    })
+    .catch(next);
+  });
+}
+
+module.exports.getNotifications = (req, res, next) => {
+  debug('GetNotifications');
+
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+
+  debug(`Get Notification for User | user:${userId}`);
+
+  User.findById(userId)
+  .exec( (err, user) => {
+    if (err) return next(err);
+    if (!user) return next(new Error('Unauthorized'));
+
+    Notification.fetchUserNotifications(user)
+    .then((notifications) => {
+      return res.json({ status: 'ok', preferences: notifications });
+    })
+    .catch(next);
   });
 }
 
