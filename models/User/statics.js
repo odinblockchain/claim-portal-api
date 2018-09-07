@@ -10,6 +10,34 @@ function validEmail(email) {
   return emailRegex2.test(email);
 };
 
+function escape_string(str) {
+  if (str === true || str === 'true') return true;
+  else if (str === false || str === 'false') return false;
+
+  return str.replace(/[\0\x08\x09\x1a\n\r"'\\\%]/g, function (char) {
+    switch (char) {
+      case "\0":
+          return "\\0";
+      case "\x08":
+          return "\\b";
+      case "\x09":
+          return "\\t";
+      case "\x1a":
+          return "\\z";
+      case "\n":
+          return "\\n";
+      case "\r":
+          return "\\r";
+      case "\"":
+      case "'":
+      case "\\":
+      case "%":
+          return "\\"+char; // prepends a backslash to backslash, percent,
+                            // and double/single quotes
+    }
+  });
+}
+
 module.exports = function(UserSchema) {
   UserSchema.statics.sample = function(foo) {
     let User = this;
@@ -325,7 +353,51 @@ module.exports = function(UserSchema) {
       .catch(reject);
     });
   };
+
+  UserSchema.statics.attemptedLogin = function(userEmail, ipAddress) {
+    let User = this;
+    userEmail = escape_string(userEmail);
+  
+    debug(`Handle AttemptedLogin - user:${userEmail}`);
+  
+    return new Promise((resolve, reject) => {
+      User.findOne({ email: userEmail })
+      .exec((err, user) => {
+        if (err) {
+          debug(`Unable to handle AttemptedLogin ERROR - user:${userEmail}`);
+          return reject(err);
+        }
+  
+        if (!user) {
+          debug(`Unable to handle AttemptedLogin NOT FOUND - user:${userEmail}`);
+          return reject(null);
+        }
+  
+        user.notificationEnabled('email.loginattempt')
+        .then((enabled) => {
+          if (!enabled) { return resolve(true); }
+          
+          user.notifyAttemptedLogin(ipAddress)
+          .then((sent) => {
+            debug(`Sent AttemptedLogin notification - user:${user._id}`);
+            return resolve(true);
+          })
+          .catch((err) => {
+            debug(`Unable to send AttemptedLogin notification - user:${user._id}`);
+            console.log(err);
+            return reject(err);
+          });
+        })
+        .catch((err) => {
+          debug(`Unable to send AttemptedLogin notification - user:${user._id}`);
+          console.log(err);
+          return reject(err);
+        });
+      });
+    });
+  };
 }
+
 // // add all static methods for this schema
 // fs.readdirSync(__dirname).forEach(function(file) {
 //   if (file !== 'index.js') {

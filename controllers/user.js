@@ -142,7 +142,7 @@ module.exports.login = (req, res) => {
   passport.authenticate('local', (err, user, info) => {
     // If Passport throws/catches an error
     if (err) {
-      debug(`Login Error - ${req.body.email}`);
+      debug(`Login Error - user:${req.body.email}`);
       Raven.captureMessage('User Login Error', {
         level: 'info',
         extra: err
@@ -204,7 +204,9 @@ module.exports.login = (req, res) => {
       }
     }
     else {
-      debug(`Login Rejected - ${req.body.email} - ${(info.message) ? info.message : 'Unknown'}`);
+      debug(`Login Rejected - user:${req.body.email} - ${(info.message) ? info.message : 'Unknown'}`);
+      if (info.message === 'Password is wrong') User.attemptedLogin(req.body.email, req.ip)
+      
       return res.status(401).json({ status: 'error', error: 'Invalid email address or password.' });
     }
   })(req, res);

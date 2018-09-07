@@ -76,8 +76,6 @@ module.exports = function(UserSchema) {
           return resolve(user);
         }
 
-        console.log(body);
-
         if (body && body.status !== 'ok')
           return resolve(user);
 
@@ -129,6 +127,60 @@ module.exports = function(UserSchema) {
   }
 
   /**
+   *  Lock a user's claim balance in. Forces a refresh of their obsidian address
+   *  to ensure a proper balance.
+   */
+  UserSchema.methods.lockBalance = function() {
+    debug(`Locking Claim Balance - user:${this.email}`);
+    let user = this;
+    
+    return new Promise((resolve, reject) => {
+      user.refreshBalance()
+      .then((_user) => {
+        _user.balance_locked = true;
+        _user.balance_locked_timestamp = moment().unix();
+        _user.balance_locked_sum = _user.balance;
+
+        user.save((err, _user) => {
+          if (err) return reject(err);
+          if (!_user) return reject(new Error('Unable to lock user balance'));
+          return resolve(_user);
+        });
+      })
+      .catch(reject);
+    });
+  }
+
+  /**
+   *  Calculate the "Early Registration" bonus amount for user
+   */
+  UserSchema.methods.calculateEarlyBirdBonus = function() {
+    let launchDate = moment('2018-09-21');    // Official end date for ODIN Claim Registration
+    let registered = moment(this.created_at);
+
+    let portalAvailable = launchDate.diff(moment('2018-07-27'), 'days'); // 8 weeks == 56 days
+    let earlyBirdDays   = launchDate.diff(registered, 'days');
+
+    let bonusModifier   = 0.03;
+    let calculatedBonus = Number(bonusModifier / (portalAvailable/earlyBirdDays));
+
+    return Number(calculatedBonus.toFixed(4));
+  }
+
+  /**
+   *  Calculate the "Locked-in" bonus amount for user
+   */
+  UserSchema.methods.calculateLockinBonus = function() {
+    let finalLockTimestmap = moment('2018-09-14').unix();
+
+    if (!this.balance_locked || !this.balance_locked_timestamp) return 0;
+    let lockedTimestamp = moment(this.balance_locked_timestamp);
+
+    if (lockedTimestamp <= finalLockTimestmap) return 0.07;
+    else return 0;
+  }
+
+  /**
    * Generate a JSON Web Token
    * https://jwt.io/
    * 
@@ -153,10 +205,16 @@ module.exports = function(UserSchema) {
       theme:          this.theme,
       walletAddress:  this.wallet,
       addressBalance: this.balance,
+      claimBalance:   this.balance_locked_sum,
+      balanceLocked:  this.balance_locked,
       flags:  {
         email:          this.email_verified,
         phone:          this.phone_verified,
         termsAccepted:  this.termsAccepted.accepted
+      },
+      bonuses: {
+        locked:       this.calculateLockinBonus(),
+        registration: this.calculateEarlyBirdBonus()
       },
       tasks: {},
       exp: jwtMoment.unix()
@@ -205,6 +263,10 @@ module.exports = function(UserSchema) {
     });
   };
 
+  /**
+   *  Checks if user has a notification preference enabled or disabled.
+   *  @param {string} notificationKey 
+   */
   UserSchema.methods.notificationEnabled = function(notificationKey) {
     let user = this;
     debug(`Checking for notification [${notificationKey}] - user:${user._id}`);
@@ -226,6 +288,10 @@ module.exports = function(UserSchema) {
     });
   };
 
+  /**
+   *  Send an email to a user letting them know they have been detected as logging
+   *  in from a new location / IP address.
+   */
   UserSchema.methods.notifyNewLogin = function(ipAddress) {
     let user = this;
     debug(`Notify User of New Login [${ipAddress}] - user:${user._id}`);
@@ -254,6 +320,50 @@ module.exports = function(UserSchema) {
       .then(resolve)
       .catch((err) => {
         Raven.captureException('Unable to deliver New Login Email', {
+          level: 'error',
+          extra: {
+            code: (err.code) ? err.code : '',
+            message: (err.message) ? err.message : ''
+          }
+        });
+
+        reject(err);
+      });
+    });
+  };
+
+  /**
+   *  Send an email to a user letting them know they have been detected as logging
+   *  in from a new location / IP address.
+   */
+  UserSchema.methods.notifyAttemptedLogin = function(ipAddress) {
+    let user = this;
+    debug(`Notify User of Attempted Login [${ipAddress}] - user:${user._id}`);
+
+    return new Promise((resolve, reject) => {
+      sgMail.setApiKey(settings.integrations.sendgrid.token);
+      sgMail.setSubstitutionWrappers('{{', '}}'); // Configure the substitution tag wrappers globally
+      let msg = {
+        personalizations: [{
+          to: [{ email: user.email }],
+          subject: 'Attempted Login Detected - ODIN Claim Portal',
+          dynamic_template_data: {
+            detected_ip_address: ipAddress
+          }
+        }],
+        template_id: 'd-97bd4b20aaa34b26aa3d526e70adaf09',
+        from: {
+          name: 'ODIN Claim Portal',
+          email: 'do-not-reply@obsidianplatform.com'
+        }
+      };
+
+      debug(`Sending Attempted Login Email - user:${user._id}`);
+
+      sgMail.send(msg)
+      .then(resolve)
+      .catch((err) => {
+        Raven.captureException('Unable to deliver Attempted Login Email', {
           level: 'error',
           extra: {
             code: (err.code) ? err.code : '',

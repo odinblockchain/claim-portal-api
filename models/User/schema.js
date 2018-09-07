@@ -127,6 +127,21 @@ const UserSchema = new Schema({
   },
 
   /**
+   * User Locked Balance
+   */
+  balance_locked: {
+    type: Boolean, default: false
+  },
+
+  balance_locked_timestamp: {
+    type: Number, default: 0
+  },
+  
+  balance_locked_sum: {
+    type: Number, default: 0
+  },
+
+  /**
    * User Acceptances
    */
   termsAccepted: PolicyAcceptance,
