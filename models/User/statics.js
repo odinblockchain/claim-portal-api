@@ -59,6 +59,8 @@ module.exports = function(UserSchema) {
           return reject(err);
         }
 
+        if (!users || users.length === 0) return resolve(0);
+
         let balancePromises = [];
         users.map(user => {
           let sum   = Number(user.balance_locked_sum);
@@ -66,14 +68,11 @@ module.exports = function(UserSchema) {
           let total = ((sum + bonus) * 2.5);
 
           balancePromises.push(total);
-          // claimTotal = claimTotal + total;
         });
 
         Promise.all(balancePromises)
         .then((balances) => {
-          console.log('BALANCES', balances);
           let lockedTotal = balances.reduce((_sum, _val) => _sum + _val);
-
           resolve(lockedTotal);
         })
         .catch((err) => {
