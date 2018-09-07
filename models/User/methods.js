@@ -141,9 +141,11 @@ module.exports = function(UserSchema) {
         _user.balance_locked_timestamp = moment().unix();
         _user.balance_locked_sum = _user.balance;
 
-        user.save((err, _user) => {
+        _user.save((err, _user) => {
           if (err) return reject(err);
           if (!_user) return reject(new Error('Unable to lock user balance'));
+          _user.sendUpdateLockedClaim();
+
           return resolve(_user);
         });
       })
@@ -171,13 +173,24 @@ module.exports = function(UserSchema) {
    *  Calculate the "Locked-in" bonus amount for user
    */
   UserSchema.methods.calculateLockinBonus = function() {
-    let finalLockTimestmap = moment('2018-09-14').unix();
+    let finalLockDate = moment('2018-09-15'); // Actual date is 14th, give them till EOD
 
-    if (!this.balance_locked || !this.balance_locked_timestamp) return 0;
+    if (!this.balance_locked || !this.balance_locked_timestamp) {
+      if (moment().isBefore(finalLockDate)) return 0.07;
+      return 0;
+    }
+
     let lockedTimestamp = moment(this.balance_locked_timestamp);
-
-    if (lockedTimestamp <= finalLockTimestmap) return 0.07;
+    if (lockedTimestamp <= finalLockDate.unix()) return 0.07;
     else return 0;
+  }
+
+  UserSchema.methods.calculateTotalClaimBonus = function() {
+    let claimBalance  = this.balance_locked_sum;
+    let earlyBonus    = claimBalance * this.calculateEarlyBirdBonus();
+    let lockedBonus   = claimBalance * this.calculateLockinBonus();
+
+    return (earlyBonus + lockedBonus).toFixed(8);
   }
 
   /**
@@ -230,6 +243,9 @@ module.exports = function(UserSchema) {
 
     if (!this.phone_verified)
       userInformation.tasks.phone = true;
+    
+    if (!this.balance_locked)
+      userInformation.tasks.lock = true;
 
     if (this.level === 'admin') {
       debug(`!LEVEL -- ADMIN - ${this._id}`);
@@ -238,6 +254,76 @@ module.exports = function(UserSchema) {
 
     // console.log('USER', userInformation);
     return jwt.sign(userInformation, settings.secret);
+  };
+
+  UserSchema.methods.sendUpdateLockedClaim = function() {
+    let user = this;
+    debug(`Notification LockedClaim - user:${user._id}`);
+
+    let sum   = Number(user.balance_locked_sum);
+    let bonus = Number(user.calculateTotalClaimBonus());
+    let total = ((sum + bonus) * 2.5).toFixed(8);
+    
+    user.notificationEnabled('email.myclaim')
+    .then((status) => {
+      if (!status) return;
+
+      debug(`Notification LockedClaim, Email Enabled - user:${user._id}`);
+
+      sgMail.setApiKey(settings.integrations.sendgrid.token);
+      sgMail.setSubstitutionWrappers('{{', '}}'); // Configure the substitution tag wrappers globally
+      let msg = {
+        personalizations: [{
+          to: [{ email: user.email }],
+          subject: 'Claim Balance Locked - ODIN Claim Portal',
+          dynamic_template_data: {
+            odn_balance:        sum,
+            odn_claim_bonuses:  bonus,
+            odin_claim_total:   total
+          }
+        }],
+        template_id: 'd-708a082ccf6d423ea29fc28358d82c55',
+        from: {
+          name: 'ODIN Claim Portal',
+          email: 'do-not-reply@obsidianplatform.com'
+        }
+      };
+
+      debug(`Sending Notification LockedClaim - user:${user._id}`);
+
+      sgMail.send(msg)
+      .then()
+      .catch((err) => {
+        debug(`FAILED EMAIL Notification LockedClaim - user:${user._id}`);
+        Raven.captureException('Unable to deliver Email Notification LockedClaim', {
+          level: 'error',
+          extra: {
+            code: (err.code) ? err.code : '',
+            message: (err.message) ? err.message : ''
+          }
+        });
+      });
+
+      user.notificationEnabled('sms.myclaim')
+      .then((status) => {
+        if (!status) return;
+
+        debug(`Notification LockedClaim, SMS Enabled - user:${user._id}`);
+        
+        user.sendSMS(`Successfully locked ODIN Claim of ${total} - Please do not make any transactions until the Snapshot`)
+        .then()
+        .catch((err) => {
+          debug(`FAILED SMS Notification LockedClaim - user:${user._id}`);
+          Raven.captureException('Unable to deliver SMS Notification LockedClaim', {
+            level: 'error',
+            extra: {
+              code: (err.code) ? err.code : '',
+              message: (err.message) ? err.message : ''
+            }
+          });
+        })
+      })
+    });
   };
 
   // TODO: Remove method
@@ -839,6 +925,76 @@ module.exports = function(UserSchema) {
       })
       .catch(reject);
     })
+  }
+
+  /**
+   * Sends an SMS to the user.
+   * Rejects request IF user does not have a verified phone.
+   * Ensures message is only 120 characters, a little under the limit of (160).
+   * 
+   * @param {string} message 
+   */
+  UserSchema.methods.sendSMS = function(message) {
+    let nexmo = new Nexmo({
+      apiKey:         settings.integrations.nexmo.key,
+      apiSecret:      settings.integrations.nexmo.secret
+    }, {
+      debug: true
+    });
+
+    let user = this;
+
+    return new Promise((resolve, reject) => {
+      if (!user.phone_verified) return reject(new Error('SMS Not Verified'));
+
+      const from  = '12018903094';
+      const to    = user.phoneNumber;
+      const text  = message.substr(0, 120); // ensure message is a little under the limit (160)
+
+      nexmo.message.sendSms(from, to, text, (err, result) => {
+        if (err) {
+          debug('SMS Auth Request Err', err);
+          return reject(err);
+        }
+  
+        debug('SMS Result', result);
+
+        if (result && Number(result.messages[0]['remaining-balance']) <= 3) {
+          let balance = Number(result.messages[0]['remaining-balance']);
+          debug(`TRIGGER WARNING -- Nexmo Balance LOW ${balance}`);
+          Raven.captureMessage('SMS Nexmo Balance Low', {
+            level: 'warning',
+            logger: 'User.Methods.sendSMSAuth',
+            extra: {
+              balance: balance
+            }
+          });
+        }
+
+        /**
+         *  {
+         *    'message-count': '1',
+              messages: [
+                {
+                  to: '13125506948',
+                  'message-id': '0B000000E170D22C',
+                  status: '0',
+                  'remaining-balance': '1.95860000',
+                  'message-price': '0.00570000',
+                  network: '310004'
+                }
+              ]
+            }
+        */
+
+        if (result && result.messages[0].status == '0') {
+          resolve(result);
+        }
+        else {
+          reject(new Error((result.error_text ? result.error_text : 'NO_RESPONSE')));
+        }
+      });
+    });
   }
 
   UserSchema.methods.sendSMSAuth = function() {

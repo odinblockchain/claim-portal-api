@@ -44,6 +44,48 @@ module.exports = function(UserSchema) {
     return 'ODIN' + foo;
   }
 
+  UserSchema.statics.fetchLockedClaimTotals = function() {
+    debug('Fetching user claim balances');
+    let User = this;
+
+    return new Promise((resolve, reject) => {
+      let claimTotal = 0;
+
+      User.find({ balance_locked: true })
+      .exec((err, users) => {
+        if (err) {
+          debug('Unable to fetch locked claims');
+          console.log(err);
+          return reject(err);
+        }
+
+        let balancePromises = [];
+        users.map(user => {
+          let sum   = Number(user.balance_locked_sum);
+          let bonus = Number(user.calculateTotalClaimBonus());
+          let total = ((sum + bonus) * 2.5);
+
+          balancePromises.push(total);
+          // claimTotal = claimTotal + total;
+        });
+
+        Promise.all(balancePromises)
+        .then((balances) => {
+          console.log('BALANCES', balances);
+          let lockedTotal = balances.reduce((_sum, _val) => _sum + _val);
+
+          resolve(lockedTotal);
+        })
+        .catch((err) => {
+          debug('Fetch locked claims error');
+          console.log(err);
+
+          return reject(err);
+        });
+      });
+    });
+  }
+
   UserSchema.statics.refreshBalances = function() {
     debug('Refreshing all user balances');
     let User = this;

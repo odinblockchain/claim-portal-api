@@ -371,6 +371,12 @@ module.exports.setNotification = (req, res, next) => {
     if (err) return next(err);
     if (!user) return next(new Error('Unauthorized'));
 
+    // make sure user has their phone verified before allowing SMS notifications
+    if (  notificationKey.toLowerCase().indexOf('sms') !== -1 &&
+          user.phone_verified === false) {
+      return res.json({ status: 'error', message: 'phone_not_verified' });
+    }
+
     Notification.setUserNotification(user, notificationKey, notificationValue)
     .then((notifications) => {
       return res.json({ status: 'ok', preferences: notifications });
@@ -400,6 +406,33 @@ module.exports.getNotifications = (req, res, next) => {
       return res.json({ status: 'ok', preferences: notifications });
     })
     .catch(next);
+  });
+}
+
+module.exports.enableClaimLock = (req, res, next) => {
+  debug('EnableClaimLock');
+
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+
+  debug(`Enable Claim Lock - user:${userId}`);
+
+  User.findById(userId)
+  .exec( (err, user) => {
+    if (err) return next(err);
+    if (!user) return next(new Error('Unauthorized'));
+    
+    if (user.balance_locked) return res.json({ status: 'error', message: 'claim_locked' });
+
+    user.lockBalance()
+    .then((locked) => {
+      debug('Successfully locked');
+
+      return res.json({ status: 'ok' });
+    }).catch(next);
   });
 }
 
