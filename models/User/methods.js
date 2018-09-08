@@ -137,9 +137,16 @@ module.exports = function(UserSchema) {
     return new Promise((resolve, reject) => {
       user.refreshBalance()
       .then((_user) => {
-        _user.balance_locked = true;
-        _user.balance_locked_timestamp = moment().unix();
-        _user.balance_locked_sum = _user.balance;
+
+        // ensure lock is before snapshot
+        let finalLock = moment.utc('2018-09-21T17:59:59'); // Official end date for ODIN Claim Lock
+        if (moment.utc().isAfter(finalLock)) {
+          return reject('lock_denied_time');
+        }
+        
+        _user.balance_locked            = true;
+        _user.balance_locked_timestamp  = moment().utc().unix();
+        _user.balance_locked_sum        = _user.balance;
 
         _user.save((err, _user) => {
           if (err) return reject(err);
@@ -157,10 +164,10 @@ module.exports = function(UserSchema) {
    *  Calculate the "Early Registration" bonus amount for user
    */
   UserSchema.methods.calculateEarlyBirdBonus = function() {
-    let launchDate = moment('2018-09-21');    // Official end date for ODIN Claim Registration
-    let registered = moment(this.created_at);
+    let launchDate = moment.utc('2018-09-21'); // Official end date for ODIN Claim Registration
+    let registered = moment.utc(this.created_at).startOf('date'); // go by the start of user's registration date
 
-    let portalAvailable = launchDate.diff(moment('2018-07-27'), 'days'); // 8 weeks == 56 days
+    let portalAvailable = launchDate.diff(moment.utc('2018-07-27'), 'days'); // 8 weeks == 56 days
     let earlyBirdDays   = launchDate.diff(registered, 'days');
 
     let bonusModifier   = 0.03;
@@ -173,15 +180,15 @@ module.exports = function(UserSchema) {
    *  Calculate the "Locked-in" bonus amount for user
    */
   UserSchema.methods.calculateLockinBonus = function() {
-    let finalLockDate = moment('2018-09-15'); // Actual date is 14th, give them till EOD
+    let finalLockDate = moment.utc('2018-09-14'); // Users have until 14th to lock claim
 
     if (!this.balance_locked || !this.balance_locked_timestamp) {
-      if (moment().isBefore(finalLockDate)) return 0.07;
+      if (moment.utc().isBefore(finalLockDate)) return 0.07;
       return 0;
     }
 
-    let lockedTimestamp = moment(this.balance_locked_timestamp);
-    if (lockedTimestamp <= finalLockDate.unix()) return 0.07;
+    let lockedTimestamp = moment.utc(this.balance_locked_timestamp * 1000);
+    if (lockedTimestamp.isBefore(finalLockDate)) return 0.07;
     else return 0;
   }
 

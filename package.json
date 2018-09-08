@@ -1,6 +1,6 @@
 {
   "name": "odin-claim-portal-api",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "",
   "main": "app.js",
   "scripts": {

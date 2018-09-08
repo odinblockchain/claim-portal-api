@@ -92,6 +92,11 @@ module.exports.setTheme = (req, res, next) => {
 module.exports.register = (req, res, next) => {
   debug(`Register User - ${req.body.email}`);
 
+  // Ensure time is before registration close
+  let registrationClosed = moment.utc('2018-09-21T15:00:00'); 
+  if (moment.utc().isAfter(registrationClosed))
+    return res.json({ status: 'error', message: 'registration_closed' });
+
   let user = new User({
     email:              req.body.email,
     password:           req.body.password,
@@ -131,8 +136,8 @@ module.exports.register = (req, res, next) => {
         debug(`Unable to deliver validation email -- ${(err.message) ? err.message : ''}`);
         return res.json({ status: 'ok', token: token });
       })
-    });
-    
+    })
+    .catch(next);
   });
 };
 
@@ -432,7 +437,15 @@ module.exports.enableClaimLock = (req, res, next) => {
       debug('Successfully locked');
 
       return res.json({ status: 'ok' });
-    }).catch(next);
+    })
+    .catch((err) => {
+      if (err === 'lock_denied_time') {
+        return res.json({ status: 'error', message: err });
+      }
+      else {
+        next(err);
+      }
+    });
   });
 }
 

@@ -22,7 +22,7 @@ const NotificationSchema = new Schema({
   email: {
     myclaim: {
       type: Boolean,
-      default: false
+      default: true
     },
     
     loginattempt: {
