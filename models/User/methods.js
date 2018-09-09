@@ -271,6 +271,9 @@ module.exports = function(UserSchema) {
     let bonus = Number(user.calculateTotalClaimBonus());
     let total = ((sum + bonus) * 2.5).toFixed(8);
     
+    /**
+     * Send Email if notifications enabled
+     */
     user.notificationEnabled('email.myclaim')
     .then((status) => {
       if (!status) return;
@@ -310,7 +313,13 @@ module.exports = function(UserSchema) {
           }
         });
       });
+    });
 
+
+    /**
+     * Send SMS if phone verified AND notifications enabled
+     */
+    if (user.phone_verified) {
       user.notificationEnabled('sms.myclaim')
       .then((status) => {
         if (!status) return;
@@ -329,8 +338,8 @@ module.exports = function(UserSchema) {
             }
           });
         })
-      })
-    });
+      });
+    }
   };
 
   // TODO: Remove method
@@ -946,17 +955,21 @@ module.exports = function(UserSchema) {
       apiKey:         settings.integrations.nexmo.key,
       apiSecret:      settings.integrations.nexmo.secret
     }, {
-      debug: true
+      debug: false
     });
 
     let user = this;
 
     return new Promise((resolve, reject) => {
-      if (!user.phone_verified) return reject(new Error('SMS Not Verified'));
-
-      const from  = '12018903094';
+      const from  = settings.integrations.nexmo.number;
       const to    = user.phoneNumber;
       const text  = message.substr(0, 120); // ensure message is a little under the limit (160)
+
+      debug(`Sending SMS:
+      from: ${from}
+      to:   ${to}
+      text: ${text}
+      id:   ${user._id}`);
 
       nexmo.message.sendSms(from, to, text, (err, result) => {
         if (err) {
@@ -998,27 +1011,20 @@ module.exports = function(UserSchema) {
           resolve(result);
         }
         else {
-          reject(new Error((result.error_text ? result.error_text : 'NO_RESPONSE')));
+          let errMessage = (result && result.error_text) ? result.error_text : 'NO_RESPONSE';
+          debug(errMessage);
+          console.log(result);
+          reject(new Error(errMessage));
         }
       });
     });
   }
 
   UserSchema.methods.sendSMSAuth = function() {
-    var nexmo = new Nexmo({
-      apiKey:         settings.integrations.nexmo.key,
-      apiSecret:      settings.integrations.nexmo.secret
-    }, {
-      debug: true
-    });
-  
     let user = this;
   
     return new Promise((resolve, reject) => {    
       const pin   = generatePin(6);
-      const from  = '12018903094';
-      const to    = user.phoneNumber;
-      const text  = `Your ODIN verification code is ${pin}`;
 
       Request.deleteMany({ user: user._id, type: 'phoneValidation' })
       .exec((err) => {
@@ -1028,55 +1034,22 @@ module.exports = function(UserSchema) {
         .then((_pinRequest) => {
           debug(`Created PhoneValidation Request - user:${user.email} phone:${user.phone}`);
 
-          nexmo.message.sendSms(from, to, text, (err, result) => {
-            if (err) {
-              debug('SMS Auth Request Err', err);
-              return reject(err);
-            }
-      
-            debug('SMS Result', result);
+          user.sendSMS(`Your ODIN verification code is ${pin}`)
+          .then((sent) => {
+            // console.log(sent);
 
-            if (result && Number(result.messages[0]['remaining-balance']) <= 3) {
-              let balance = Number(result.messages[0]['remaining-balance']);
-              debug(`TRIGGER WARNING -- Nexmo Balance LOW ${balance}`);
-              Raven.captureMessage('SMS Nexmo Balance Low', {
-                level: 'warning',
-                logger: 'User.Methods.sendSMSAuth',
-                extra: {
-                  balance: balance
-                }
-              });
-            }
-      
-            /**
-             *  {
-             *    'message-count': '1',
-                  messages: [
-                    {
-                      to: '13125506948',
-                      'message-id': '0B000000E170D22C',
-                      status: '0',
-                      'remaining-balance': '1.95860000',
-                      'message-price': '0.00570000',
-                      network: '310004'
-                    }
-                  ]
-                }
-            */
-      
-            if (result && result.messages[0].status == '0') {
-              user.update({
-                $set: {
-                  phone_verified: false
-                }
-              }, (err, modified) => {
-                if (err) return reject(err);
-                if (modified && modified.ok !== 1) return reject('NOT_MODIFIED');
-                resolve(pin);
-              });
-            } else {
-              reject(result.error_text ? result.error_text : 'NO_RESPONSE');
-            }
+            user.update({
+              $set: {
+                phone_verified: false
+              }
+            }, (err, modified) => {
+              if (err) return reject(err);
+              if (modified && modified.ok !== 1) return reject('NOT_MODIFIED');
+              resolve(pin);
+            });
+          })
+          .catch((err) => {
+            reject(err.message ? err.message : err);
           });
         });
       });
