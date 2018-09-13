@@ -89,11 +89,22 @@ module.exports.setTheme = (req, res, next) => {
   });
 };
 
+module.exports.registerCheck = (req, res, next) => {
+  debug(`Register User - ${req.body.email}`);
+
+  // Ensure time is before registration close
+  let registrationClosed = moment.utc('2018-09-14T00:00:00'); 
+  if (moment.utc().isAfter(registrationClosed))
+    return res.json({ status: 'error', message: 'registration_closed' });
+
+  return res.json({ status: 'ok' });  
+}
+
 module.exports.register = (req, res, next) => {
   debug(`Register User - ${req.body.email}`);
 
   // Ensure time is before registration close
-  let registrationClosed = moment.utc('2018-09-21T15:00:00'); 
+  let registrationClosed = moment.utc('2018-09-14T00:00:00'); 
   if (moment.utc().isAfter(registrationClosed))
     return res.json({ status: 'error', message: 'registration_closed' });
 

@@ -41,6 +41,7 @@ router.post('/changePassword', auth, UserController.changePassword);
 router.post('/setNotification', auth, UserController.setNotification);
 router.get('/getNotifications', auth, UserController.getNotifications);
 router.get('/enableClaimLock', auth, UserController.enableClaimLock);
+router.get('/registrationOpen', UserController.registerCheck);
 // router.get('/user', (req, res, next) => {
 //   User.findOne({ email: 'email2@website.com' })
 //   .populate('auth_ips')
