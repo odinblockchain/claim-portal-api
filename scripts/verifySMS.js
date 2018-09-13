@@ -25,7 +25,7 @@ let userAddress = process.argv[2] || '';
 
 db.connect(dbString)
 .then(() => {
-  User.find({ email: userAddress })
+  User.findOne({ email: userAddress })
   .exec((err, user) => {
     if (err) {
       console.log(err);

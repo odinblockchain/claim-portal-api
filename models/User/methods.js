@@ -1057,9 +1057,9 @@ module.exports = function(UserSchema) {
   }
 
   UserSchema.methods.forceVerifySMS = function() {
-    debug(`Force Verify SMS - user:${user.email}`);
     let user = this;
-
+    
+    debug(`Force Verify SMS - user:${user.email}`);
     return new Promise((resolve, reject) => {
       user.update({
         $set: {
