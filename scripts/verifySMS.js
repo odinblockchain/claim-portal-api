@@ -32,22 +32,20 @@ db.connect(dbString)
       return process.exit(0);
     }
 
-    user.phone_verified = true;
-    user.save((err) => {
-      if (err) {
-        console.log(err);
-        return process.exit(0);
-      }
+    if (!user) {
+      console.log('USER NOT FOUND');
+      return process.exit(0);
+    }
 
-      Flag.addFlag(user._id, 'phoneValidation', 'force_phone_verify')
-      .then((added) => {
-        console.log('Completed');
-        return process.exit(1);
-      })
-      .catch((err) => {
-        console.log(err);
-        return process.exit(0);
-      });
+    user.forceVerifySMS()
+    .then((status) => {
+      console.log(`Verfied SMS`);
+      setTimeout(() => {
+        process.exit(1);
+      }, 5000);
+    })
+    .catch((err) => {
+      console.log(err);
     });
   });
 })

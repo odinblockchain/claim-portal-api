@@ -1055,6 +1055,32 @@ module.exports = function(UserSchema) {
       });
     });
   }
+
+  UserSchema.methods.forceVerifySMS = function() {
+    debug(`Force Verify SMS - user:${user.email}`);
+    let user = this;
+
+    return new Promise((resolve, reject) => {
+      user.update({
+        $set: {
+          phone_verified: true
+        }
+      }, (err, modified) => {
+        if (err) return reject(err);
+        if (modified && modified.ok !== 1) return reject('NOT_MODIFIED');
+
+        Flag.addFlag(user._id, 'phoneValidation', 'force_phone_verify')
+        .then((added) => {
+          console.log('Completed');
+          return resolve(true);
+        })
+        .catch((err) => {
+          console.log(err);
+          return reject(err);
+        });
+      });
+    });
+  }
   
   UserSchema.methods.verifySMSAuth = function(pin) {
     let user = this;
