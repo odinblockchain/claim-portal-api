@@ -139,7 +139,7 @@ module.exports = function(UserSchema) {
       .then((_user) => {
 
         // ensure lock is before snapshot
-        let finalLock = moment.utc('2018-09-14T00:00:00'); // Official end date for ODIN Claim Lock
+        let finalLock = moment.utc('2018-09-21T17:59:59'); // Official end date for ODIN Claim Lock
         if (moment.utc().isAfter(finalLock)) {
           return reject('lock_denied_time');
         }
@@ -180,7 +180,7 @@ module.exports = function(UserSchema) {
    *  Calculate the "Locked-in" bonus amount for user
    */
   UserSchema.methods.calculateLockinBonus = function() {
-    let finalLockDate = moment.utc('2018-09-14'); // Users have until 14th to lock claim
+    let finalLockDate = moment.utc('2018-09-14T00:00:00'); // Users have until 14th to lock claim
 
     if (!this.balance_locked || !this.balance_locked_timestamp) {
       if (moment.utc().isBefore(finalLockDate)) return 0.07;
