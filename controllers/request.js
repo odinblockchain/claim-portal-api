@@ -5,6 +5,7 @@ const Request   = mongoose.model('Request');
 const debug     = require('debug')('odin-portal:controller:request');
 const QRCode    = require('qrcode');
 const moment    = require('moment');
+const crypto    = require('crypto');
 
 function parseUserAuthHeader(req) {
   try {
@@ -19,6 +20,143 @@ function parseUserAuthHeader(req) {
     console.log(err);
     return '';
   }
+}
+
+function generatePin(max) {
+  if (typeof max === 'undefined') max = 4;
+  let buff = crypto.randomBytes(8);
+  let uint = buff.readUInt32LE(0);
+  return (uint + '').substr(0, max);
+}
+
+function escape_string(str) {
+  if (str === true || str === 'true') return true;
+  else if (str === false || str === 'false') return false;
+
+  return str.replace(/[\0\x08\x09\x1a\n\r"'\\\%]/g, function (char) {
+    switch (char) {
+      case "\0":
+          return "\\0";
+      case "\x08":
+          return "\\b";
+      case "\x09":
+          return "\\t";
+      case "\x1a":
+          return "\\z";
+      case "\n":
+          return "\\n";
+      case "\r":
+          return "\\r";
+      case "\"":
+      case "'":
+      case "\\":
+      case "%":
+          return "\\"+char; // prepends a backslash to backslash, percent,
+                            // and double/single quotes
+    }
+  });
+}
+
+module.exports.createRequestToken = (req, res, next) => {
+  let userRequestEmail  = escape_string(req.body.requestUserEmail);
+  let userRequestType   = escape_string(req.body.requestType);
+  let userRequestExtra  = escape_string(req.body.requestExtra);
+
+  debug(`Creating Request Token - user:${userRequestEmail}
+  Email: ${userRequestEmail}
+  Type: ${userRequestType}
+  Extra: ${userRequestExtra}`);
+
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth || !userDetails.exp)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+
+  User.findById(userId)
+  .exec( (err, user) => {
+    if (err) {
+      console.log(err);
+      return next(err);
+    }
+
+    if (user.level !== 'admin') {
+      debug('Alert Set REJECTED -- Unauthorised');
+      return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+    }
+
+    let generatedCode = generatePin(6);
+
+    let request = Request({
+      user:   user._id,
+      code:   generatedCode,
+      type:   userRequestType,
+      extra:  userRequestExtra
+    });
+
+    request.save((err) => {
+      if (err) {
+        console.log(err);
+        return next(err);
+      }
+
+      return res.json({ status: 'ok', generated_code: generatedCode });
+    });
+
+    // User.findOne({ email: userRequestEmail })
+    // .exec((err, requestUser) => {
+    //   if (err) {
+    //     console.log(err);
+    //     return next(err);
+    //   }
+
+    //   Request.removeRequestsByType(userRequestEmail._id, userRequestType)
+    //   .then((removed) => {
+    //     let request = Request({
+    //       user: requestUser._id,
+    //       code: generatePin(6),
+    //       type: userRequestType
+    //     });
+
+    //     request.save((err) => {
+    //       if (err) {
+    //         console.log(err);
+    //         return next(err);
+    //       }
+
+    //       return res.json({ status: 'ok' });
+    //     })
+    //   }).catch(next);
+    // });
+  });
+}
+
+module.exports.verifyRequestToken = (req, res, next) => {
+  let requestType = escape_string(req.body.requestType);
+  let requestCode = escape_string(req.body.requestCode);
+
+  debug(`Verifying Request Token -
+  Code: ${requestCode}
+  Type: ${requestType}`);
+
+  Request
+  .findOne({ type: requestType, code: requestCode })
+  .exec((err, request) => {
+    if (err) {
+      debug(`Request Validate wo/AUTH Error - ${requestType} (${requestCode})`);
+      console.log(err);
+      return next(err);
+    }
+
+    if (!request) {
+      debug(`Verify Request Token Missing - ${requestType} (${requestCode})`);
+      return res.json({ status: 'error' });
+    }
+    else {
+      debug(`Verify Request Token Valid - ${requestType} (${requestCode})`);
+      return res.json({ status: 'ok' });
+    }
+  });
 }
 
 module.exports.resendVerifyEmail = (req, res, next) => {

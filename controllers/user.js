@@ -3,6 +3,8 @@ const mongoose      = require('mongoose');
 const User          = mongoose.model('User');
 const debug         = require('debug')('odin-portal:controller:user');
 const AuthIP        = mongoose.model('AuthIP');
+const Flag          = mongoose.model('Flag');
+const Request       = mongoose.model('Request');
 const Notification  = mongoose.model('Notification');
 const moment        = require('moment');
 const metrics       = require('../lib/metrics');
@@ -100,56 +102,110 @@ module.exports.registerCheck = (req, res, next) => {
   return res.json({ status: 'ok' });  
 }
 
+hasRegistrationCode = (req) => {
+  return new Promise((resolve, reject) => {
+    if (req.body.registrationCode && req.body.registrationCode != '') {
+      Request
+      .findOne({ type: 'allowRegistration', code: escape_string(req.body.registrationCode) })
+      .exec((err, allowedRegistrationRequest) => {
+        if (err) {
+          console.log(err);
+          return reject(err);
+        }
+
+        if (!allowedRegistrationRequest) {
+          return resolve(false);
+        }
+
+        return resolve(allowedRegistrationRequest);
+      });
+    }
+  })
+}
+
 module.exports.register = (req, res, next) => {
-  debug(`Register User - ${req.body.email}`);
+  let postParams = req.body;
+
+  debug(`Register User -
+  Email: ${postParams.user.email}
+  Code: ${postParams.registrationCode}`);
 
   // Ensure time is before registration close
-  let registrationClosed = moment.utc('2018-09-14T00:00:00'); 
-  if (moment.utc().isAfter(registrationClosed))
-    return res.json({ status: 'error', message: 'registration_closed' });
+  let registrationClosed = moment.utc('2018-09-14T00:00:00');
 
-  let user = new User({
-    email:              req.body.email,
-    password:           req.body.password,
-    wallet:             req.body.walletAddress,
-    termsAccepted:      req.body.termsAccepted,
-    email_verified:     false,
-    wallet_verified:    true
-  });
-
-  user.save((err) => {
-    if (err) {
-      debug(`Register User Error - ${req.body.email}`);
-      Raven.captureMessage('Register User Error', {
-        level: 'info',
-        extra: err
-      });
-
-      return res.json({ status: 'error', error: err });
+  hasRegistrationCode(req)
+  .then((registrationCode) => {
+    
+    if (moment.utc().isAfter(registrationClosed) && !registrationCode) {
+      return res.json({ status: 'error', message: 'registration_closed' });
     }
 
-    AuthIP.saveActivity(user, req.ip)
-    .then((authStatus) =>  debug('Register, AuthIp Activity Saved') )
-    .catch((err) => debug('Register, AuthIp Activity Issue') );
+    let user = new User({
+      email:              postParams.user.email,
+      password:           postParams.user.password,
+      wallet:             postParams.user.walletAddress,
+      termsAccepted:      postParams.user.termsAccepted,
+      email_verified:     false,
+      wallet_verified:    true
+    });
+  
+    if (registrationCode) {
+      debug(`Registration has allowRegistration Code
+      Code: ${registrationCode.code}`);
+    }
+  
+    user.save((err) => {
+      if (err) {
+        debug(`Register User Error - ${postParams.user.email}`);
+        Raven.captureMessage('Register User Error', {
+          level: 'info',
+          extra: err
+        });
+  
+        return res.json({ status: 'error', error: err });
+      }
+  
+      AuthIP.saveActivity(user, req.ip)
+      .then((authStatus) =>  debug('Register, AuthIp Activity Saved') )
+      .catch((err) => debug('Register, AuthIp Activity Issue') );
+  
+      metrics.measurement('registration', postParams.user.timestampDiff);
+  
+      if (registrationCode) {
 
-    metrics.measurement('registration', req.body.timestampDiff);
-
-    user.refreshBalance()
-    .then((_userRefresh) => {
-      let token = _userRefresh.generateJwt();
-
-      user.requireEmailValidation()
-      .then((sendGridResult) => {
-        debug('Sent Email Validation');
-        return res.json({ status: 'ok', token: token });
+        registrationCode.destruct()
+        .then(() => {
+          debug(`Registration Code Destroyed`);
+        }).catch(next);
+  
+        Flag.addFlag(user._id, 'registration', 'registration_closed', {
+          code: registrationCode.code,
+          exta: registrationCode.extra
+        })
+        .then(() => {
+          debug(`Registration has been flagged
+          ID: ${user._id}
+          Email: ${user.email}`);
+        }).catch();
+      }
+  
+      user.refreshBalance()
+      .then((_userRefresh) => {
+        let token = _userRefresh.generateJwt();
+  
+        user.requireEmailValidation()
+        .then((sendGridResult) => {
+          debug('Sent Email Validation');
+          return res.json({ status: 'ok', token: token });
+        })
+        .catch((err) => {
+          debug(`Unable to deliver validation email -- ${(err.message) ? err.message : ''}`);
+          return res.json({ status: 'ok', token: token });
+        });
       })
-      .catch((err) => {
-        debug(`Unable to deliver validation email -- ${(err.message) ? err.message : ''}`);
-        return res.json({ status: 'ok', token: token });
-      })
-    })
-    .catch(next);
-  });
+      .catch(next);
+    });
+  }).catch(next);
 };
 
 module.exports.login = (req, res) => {

@@ -6,15 +6,23 @@ const debug     = require('debug')('odin-portal:model:request');
  * Schema for User Requests
  */
 const RequestSchema = new Schema({
-  user: { type: Schema.Types.ObjectId, ref: 'User' },
+  user: {
+    type: Schema.Types.ObjectId,
+    ref: 'User'
+  },
   
-  // passwordReset, emailValidation, phoneValidation, tfaValidation (2FA)
+  // passwordReset, emailValidation, phoneValidation, tfaValidation (2FA), register
   type: {
     type: String,
     default: ''
   },
   
   code: {
+    type: String,
+    default: ''
+  },
+
+  extra: {
     type: String,
     default: ''
   }
@@ -143,5 +151,22 @@ RequestSchema.statics.getLatestRequestByType = function(userId, type) {
     });
   });
 }
+
+RequestSchema.methods.destruct = function() {
+  let request = this;
+  let Request = mongoose.model('Request');
+
+  return new Promise((resolve, reject) => {
+    Request.findByIdAndRemove(request._id)
+    .exec((err, removedRequest) => {
+      if (err) {
+        console.log(err);
+        return reject(err);
+      }
+
+      resolve(removedRequest);
+    })
+  })
+} 
 
 module.exports = mongoose.model('Request', RequestSchema);

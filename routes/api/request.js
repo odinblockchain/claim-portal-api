@@ -31,6 +31,8 @@ router.get('/forgotPasswordCancel', RequestController.forgotPasswordCancel);
 router.get('/resetPassword', RequestController.resetPasswordAuthenticate);
 router.post('/resetPassword', RequestController.resetPassword);
 
+router.post('/createRequestToken', auth, RequestController.createRequestToken);
+router.post('/verifyRequestToken', RequestController.verifyRequestToken);
 /**
  * Catch UnauthorizedErrors
  */
