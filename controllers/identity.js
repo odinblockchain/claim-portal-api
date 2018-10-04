@@ -288,7 +288,7 @@ module.exports.submitIdentity = (req, res, next) => {
             "first_name":         req.body['kyc_first_name'],
             "last_name":          req.body['kyc_last_name'],
             "dob":                req.body['kyc_birth_date'],
-            "background_checks":  "0"
+            "background_checks":  "1"
           };
   
           let kyc_user_details = {
