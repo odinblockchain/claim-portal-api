@@ -9,6 +9,9 @@ const express         = require('express');
 const path            = require('path');
 const cookieParser    = require('cookie-parser');
 const logger          = require('morgan');
+const bodyParser      = require('body-parser');
+const formData = require("express-form-data");
+const os = require("os");
 const coindApi        = require('xxl-coind-express-api');
 const debug           = require('debug')('odin-portal:app');
 const session         = require('express-session');
@@ -31,6 +34,11 @@ Raven.config(settings['integrations']['sentry']['DSN'], {
   release: package.version,
   environment: env
 }).install();
+
+const formDataOpts = {
+  uploadDir: os.tmpdir(),
+  autoClean: true
+};
 
 // Create list of countries
 let countryCodes = [];
@@ -171,8 +179,12 @@ if (env === 'production') {
 }
 
 // Parse JSON POST
+// app.use(formData.parse(formDataOpts));
 app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: true }));
+// app.use(formData.parse(formDataOpts));
+// app.use(bodyParser.json({ limit: '50mb' }));
+// app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 
 // Setup xxl-coind-express middleware
 let allowedMethods = ['verifymessage'];
@@ -235,6 +247,7 @@ app.use(function(err, req, res, next) {
 
   let errMessage = (env === 'development') ? ((err.message) ? err.message : 'Server Error') : 'Server Error';
   debug(`Server Error -- ${errMessage}`);
+  console.log(err);
 
   // render the error page
   res.status(err.status || 500);

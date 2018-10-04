@@ -36,6 +36,16 @@ const UserSchema = new Schema({
   level: {
     type: String, default: 'user'
   },
+ 
+  // Status of their claim (pending|rejected|accepted|verified)
+  claim_status: {
+    type: String, default: 'pending'
+  },
+
+  // Wallet address associated with user
+  claim_address: {
+    type: String, default: ''
+  },
 
   // Timestamp of request start
   created_at: {

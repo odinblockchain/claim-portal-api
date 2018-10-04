@@ -6,6 +6,7 @@ const jwt             = require('jsonwebtoken');
 const mongoose        = require('mongoose');
 const Request         = mongoose.model('Request');
 const Flag            = mongoose.model('Flag');
+const Identity        = mongoose.model('Identity');
 const Notification    = mongoose.model('Notification');
 const sgMail          = require('@sendgrid/mail');
 const Raven           = require('raven');
@@ -227,6 +228,7 @@ module.exports = function(UserSchema) {
       addressBalance: this.balance,
       claimBalance:   this.balance_locked_sum,
       balanceLocked:  this.balance_locked,
+      claimStatus:    this.claim_status,
       flags:  {
         email:          this.email_verified,
         phone:          this.phone_verified,
@@ -248,19 +250,41 @@ module.exports = function(UserSchema) {
       userInformation.tasks.tfa = true;
     }
 
-    if (!this.phone_verified)
-      userInformation.tasks.phone = true;
-    
-    if (!this.balance_locked)
-      userInformation.tasks.lock = true;
-
+    if (!this.phone_verified) userInformation.tasks.phone = true;
+    if (!this.balance_locked) userInformation.tasks.lock = true;
+    if (this.balance_locked && !(/accepted|verified/ig.test(this.claim_status)))
+      userInformation.tasks.identityCheck = true
+      
     if (this.level === 'admin') {
       debug(`!LEVEL -- ADMIN - ${this._id}`);
       userInformation.admin = true;
     }
 
+    if (this.level === 'mod') {
+      debug(`!LEVEL -- MOD - ${this._id}`);
+      userInformation.mod = true;
+    }
+
     // console.log('USER', userInformation);
     return jwt.sign(userInformation, settings.secret);
+  };
+
+  UserSchema.methods.fetchIdentityChecks = function() {
+    let user = this;
+    debug(`Fetch Identity Checks - user:${user._id}`);
+
+    return new Promise((resolve, reject) => {
+      Identity.find({ user: user._id })
+      .populate('user')
+      .exec((err, _identities) => {
+        if (err) {
+          console.log('ERR OCCURRED', (err && err.message) ? err.message : err);
+          return reject(err);
+        }
+
+        return resolve(_identities);
+      });
+    });
   };
 
   UserSchema.methods.sendUpdateLockedClaim = function() {
@@ -941,6 +965,74 @@ module.exports = function(UserSchema) {
       })
       .catch(reject);
     })
+  };
+
+  UserSchema.methods.sendClaimUpdate = function(subject, message, shortMessage) {
+    let user = this;
+    debug(`Send Claim Update - user:${user._id}`);
+
+    return new Promise((resolve, reject) => {
+      Promise.all([ user.notificationEnabled('email.myclaim'), user.notificationEnabled('sms.myclaim') ])
+      .then(([ notifyEmail, notifySms ]) => {
+        debug(`Send Claim Update notifyEmail=${notifyEmail} notifySMS=${notifySms} - user:${user._id}`);
+
+        let notificationPromises = [];
+        if (notifyEmail) notificationPromises.push(user.sendEmail(subject, message));
+        if (user.phone_verified && notifySms) notificationPromises.push(user.sendSMS(shortMessage));
+
+        Promise.all(notificationPromises)
+        .then((statuses) => {
+          console.log(statuses);
+          resolve(true);
+        })
+        .catch(reject);
+      })
+      .catch(reject);
+    });
+  };
+
+  UserSchema.methods.sendEmail = function(subject, message) {
+    let user = this;
+    debug(`Send Email - user:${user._id}
+    Subject: ${subject}
+    Message: ${message}`);
+
+    return new Promise((resolve, reject) => {
+      sgMail.setApiKey(settings.integrations.sendgrid.token);
+      sgMail.setSubstitutionWrappers('{{', '}}'); // Configure the substitution tag wrappers globally
+      let msg = {
+        personalizations: [{
+          to: [{ email: user.email }],
+          subject: subject,
+          dynamic_template_data: {
+            claim_update_body: message
+          }
+        }],
+        template_id: 'd-30e142e6e18a4926ab4a14b3a9a1ec06',
+        from: {
+          name: 'ODIN Claim Portal',
+          email: 'do-not-reply@obsidianplatform.com'
+        }
+      };
+
+      debug(`Sending Email Notification - user:${user._id}`);
+
+      sgMail.send(msg)
+      .then(() => resolve(true))
+      .catch((err) => {
+        debug(`FAILED EMAIL Notification - user:${user._id}`);
+        Raven.captureException('Unable to deliver Email Notification', {
+          level: 'error',
+          extra: {
+            subject: subject,
+            message: message,
+            code: (err.code) ? err.code : '',
+            message: (err.message) ? err.message : ''
+          }
+        });
+        reject(err);
+      });
+    });
   }
 
   /**
@@ -959,6 +1051,9 @@ module.exports = function(UserSchema) {
     });
 
     let user = this;
+
+    debug(`Send SMS - user:${user._id}
+    Message: ${message}`);
 
     return new Promise((resolve, reject) => {
       const from  = settings.integrations.nexmo.number;

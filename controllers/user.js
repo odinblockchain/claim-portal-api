@@ -481,6 +481,35 @@ module.exports.getNotifications = (req, res, next) => {
   });
 }
 
+module.exports.fetchIdentities = (req, res, next) => {
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+
+  debug(`fetchIdentities - user:${userId}`);
+
+  User.findById(userId)
+  .exec( (err, user) => {
+    if (err) return next(err);
+    if (!user) return next(new Error('Unauthorized'));
+
+    user.fetchIdentityChecks()
+    .then((identities) => {
+      let response = identities.map((_id) => { 
+        return {
+          status:   _id.identity_status,
+          updated:  (_id.updated_at != 0) ? moment(_id.updated_at).format('YYYY-MM-DD HH:MM:SS') : 'pending'
+        }
+      });
+
+      res.json({ status: 'ok', checks: response });
+    })
+    .catch(next);
+  });
+}
+
 module.exports.enableClaimLock = (req, res, next) => {
   debug('EnableClaimLock');
 

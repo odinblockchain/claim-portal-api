@@ -11,6 +11,7 @@ const ApiController = require('../../controllers/api');
 
 // import API routes
 const userRouter = require('./user');
+const identityRouter = require('./identity');
 const authRouter = require('./auth');
 const requestRouter = require('./request');
 const metricsRouter = require('./metrics');
@@ -51,6 +52,7 @@ router.get('/countryCodes', (req, res, next) => {
 
 // implement API routes
 router.use('/user', userRouter);
+router.use('/identity', identityRouter);
 router.use('/auth', authRouter);
 router.use('/request', requestRouter);
 router.use('/metric', metricsRouter);
