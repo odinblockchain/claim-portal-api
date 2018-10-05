@@ -15,6 +15,7 @@ const speakeasy       = require('speakeasy');
 const moment          = require('moment');
 const Nexmo           = require('nexmo');
 const BlockedNumbers  = require('../../lib/blockedNumbers');
+const request         = require('request');
 // const User      = mongoose.model('User');
 
 function generatePin(max) {
@@ -286,6 +287,199 @@ module.exports = function(UserSchema) {
       });
     });
   };
+
+  UserSchema.methods.setupWallet = function() {
+    let user = this;
+    debug(`Setup User Wallet - user:${user._id}`);
+
+    return new Promise((resolve, reject) => {
+      if (user.claim_setup) return resolve(user);
+
+      user.setupWalletAddress()
+      .then((address) => {
+        user.setupWalletBalance()
+        .then((balance) => {
+          user.claim_setup = true;
+          user.save((err, _user) => {
+            if (err) {
+              debug(`Unable to setup wallet - user:${user._id}`);
+              Raven.captureException('Cannot setup wallet', {
+                level: 'error',
+                extra: {
+                  user: user._id,
+                  address: address,
+                  balance: balance,
+                  error: err
+                }
+              });
+  
+              return reject(err);
+            }
+  
+            return resolve(user);
+          })
+        }).catch(reject);
+      }).catch(reject);
+    });
+  };
+
+  UserSchema.methods.setupWalletBalance = function() {
+    let user = this;
+    debug(`Setup::WalletBalance - user:${user._id}`);
+
+    return new Promise((resolve, reject) => {
+      if (user.claim_setup) return resolve(user.claim_balance);
+      if (user.claim_address === '') return reject(new Error('no_claim_address'));
+
+      let baseBalance   = Number(this.balance_locked_sum);
+      let bonusBalance  = Number(this.calculateTotalClaimBonus());
+      let allocatedOdin = (baseBalance + bonusBalance) * 2.5;
+
+      debug(`Setup::WalletBalance - user:${user._id}
+      Amount of ODIN: ${allocatedOdin}`);
+
+      let uri     = `${settings.apiHost}/api/blockchain/move`;
+      let params  = {
+        fromaccount:  "claim_primary",
+        toaccount:    user.claimId,
+        amount:       allocatedOdin
+      };
+  
+      debug('Moving Funds to Claim Address...', params);
+  
+      request({ uri: uri, json: true, qs: params }, (err, response, body) => {
+        debug('API', {
+          error:    (err) ? err.message : '',
+          response: (response) ? response.statusCode : '',
+          body:     body
+        });
+
+        if (err || response.statusCode !== 200) {
+          debug(`Setup::WalletBalance Error - user:${user._id}`);
+          Raven.captureException('Cannot fill claim address', {
+            level: 'error',
+            extra: {
+              user: user._id,
+              amount: allocatedOdin,
+              error: err,
+              body: body,
+              response: response
+            }
+          });
+
+          return reject('EAUTH');
+        }
+
+        if (body === true || body === 'true') {
+          user.claim_balance  = allocatedOdin;
+
+          user.save((err, _user) => {
+            if (err) {
+              debug(`Setup::WalletBalance Error - user:${user._id}`);
+              Raven.captureException('Cannot save claim address', {
+                level: 'error',
+                extra: {
+                  user: user._id,
+                  amount: allocatedOdin,
+                  error: err,
+                  body: body,
+                  response: response
+                }
+              });
+              return reject(err);
+            }
+
+            return resolve(user.claim_balance);
+          });
+        }
+        else {
+          debug(`Setup::WalletBalance Move Error - user:${user._id}`);
+          Raven.captureException('Cannot move funds to claim address', {
+            level: 'error',
+            extra: {
+              user: user._id,
+              amount: allocatedOdin,
+              error: err,
+              body: body,
+              response: response
+            }
+          });
+
+          return reject('BAD_RESPONSE');
+        }
+      });
+    });
+  }
+
+  UserSchema.methods.setupWalletAddress = function() {
+    let user = this;
+    debug(`Setup::WalletAddress - user:${user.claimId}`);
+
+    return new Promise((resolve, reject) => {
+      if (user.claim_setup) return resolve(user.claim_address);
+
+      let uri     = `${settings.apiHost}/api/blockchain/getaccountaddress`;
+      let params  = {
+        account:  user.claimId
+      };
+  
+      debug('Setup::WalletAddress', params);
+  
+      request({ uri: uri, json: true, qs: params }, (err, response, body) => {
+        debug('API', {
+          error:    (err) ? err.message : '',
+          response: (response) ? response.statusCode : '',
+          body:     body
+        });
+
+        if (err || response.statusCode !== 200) {
+          debug(`Setup::WalletAddress Bad Auth - user:${user._id}`);
+          Raven.captureException('Setup::WalletAddress BAD_AUTH', {
+            level: 'error',
+            tags: { blockchainMethod: 'getaccountaddress' },
+            extra: {
+              error: err,
+              body: body,
+              response: response
+            }
+          });
+
+          return reject('EAUTH');
+        }
+
+        if (body.length) {
+          user.claim_address = body;
+          user.save((err, _user) => {
+            if (err) {
+              debug(`Setup::WalletAddress Bad Save - user:${user._id}`);
+              Raven.captureException('Setup::WalletAddress BAD_SAVE', {
+                level: 'error',
+                tags: { blockchainMethod: 'getaccountaddress' },
+                extra: {
+                  error: err
+                }
+              });
+              return reject(err);
+            }
+
+            return resolve(user.claim_address);
+          });
+        }
+        else {
+          debug(`Setup::WalletAddress Bad Generation - user:${user._id}`);
+          Raven.captureException('Setup::WalletAddress BAD_GENERATE', {
+            level: 'error',
+            tags: { blockchainMethod: 'getaccountaddress' },
+            extra: {
+              body: body
+            }
+          });
+
+          return reject('BAD_RESPONSE');
+        }
+      });
+    });
+  }
 
   UserSchema.methods.sendUpdateLockedClaim = function() {
     let user = this;
@@ -1056,6 +1250,8 @@ module.exports = function(UserSchema) {
     Message: ${message}`);
 
     return new Promise((resolve, reject) => {
+      if (!message) return resolve(false);
+      
       const from  = settings.integrations.nexmo.number;
       const to    = user.phoneNumber;
       const text  = message.substr(0, 120); // ensure message is a little under the limit (160)

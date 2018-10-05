@@ -33,7 +33,8 @@ const upload = multer({
 
 let kyc_upload = upload.fields([
   { name: 'kyc_selfie', maxCount: 1 },
-  { name: 'kyc_document', maxCount: 1 }
+  { name: 'kyc_document', maxCount: 1 },
+  { name: 'kyc_address', maxCount: 1 }
 ]);
 
 function parseUserAuthHeader(req) {
@@ -113,16 +114,16 @@ module.exports.callback = (req, res, next) => {
   Callback Data:
   ${JSON.stringify(req.body)}`);
 
-  if (!Identity.ValidateSignature(req.body)) {
-    debug(`Shuftipro Identity Callback - Invalid Signature`);
-    console.log(req.body);
-    Raven.captureMessage('Identity Signature Rejected', {
-      level: 'warn',
-      body: req.body
-    });
+  // if (!Identity.ValidateSignature(req.body)) {
+  //   debug(`Shuftipro Identity Callback - Invalid Signature`);
+  //   console.log(req.body);
+  //   Raven.captureMessage('Identity Signature Rejected', {
+  //     level: 'warn',
+  //     body: req.body
+  //   });
 
-    return res.send('ok');
-  }
+  //   return res.send('ok');
+  // }
 
   Identity.findOne({ reference_id: req.body['reference'] })
   .populate('user')
@@ -133,36 +134,51 @@ module.exports.callback = (req, res, next) => {
       return res.send('ok');
     }
 
-
-    let flagPromises = []
-    if (req.body['status_code'] === 'SP1') {
-      // actually "verified"
-
-      if (identity['notified'] === false && identity['identity_status'] != 'accepted') {
-        debug('Shuftipro Identity Callback - Send Claim Notification');
-        identity['notified'] = true;
-        flagPromises.push(identity.user.sendClaimUpdate('ODIN Claim Status Updated', 'This is a notification to let you know that the status of your recent identity submission on the ODIN Claim Portal has been updated. Our provider has accepted your documents and they are now being processed. Please continue to monitor your ODIN Claim Portal dashboard for any additional changes. We will attempt to notify you when you can withdraw your ODIN.', `Your ODIN Claim status has been updated to: 'accepted'. Check your dashboard for details.`));
-      }
-
-      identity['identity_status']   = 'accepted';
-      identity.user['claim_status'] = 'accepted';
-    }
-    else if (req.body['status_code'] === 'SP2') {
-      // actually "accepted"
+    let flagPromises = [];
+    if (req.body['event'] === 'verification.accepted') {
+      debug('Shuftipro Identity Callback -- ACCEPTED');
+      // VERIFIED AND ACCEPTED
 
       if (identity['notified'] === false && identity['identity_status'] != 'verified') {
         debug('Shuftipro Identity Callback - Send Claim Notification');
         identity['notified'] = true;
-        flagPromises.push(identity.user.sendClaimUpdate('ODIN Claim Status Updated', 'This is a notification to let you know that the status of your recent identity submission on the ODIN Claim Portal has been updated. Our provider has verified your documents. Please continue to monitor your ODIN Claim Portal dashboard for any additional changes. We will attempt to notify you when you can withdraw your ODIN.', `Your ODIN Claim status has been updated to: 'verified'. Check your dashboard for details.`));
+        flagPromises.push(identity.user.sendClaimUpdate('ODIN Claim Status Updated', `This is a notification to let you know that the status of your recent identity submission on the ODIN Claim Portal has been updated. Our provider has accepted your documents and your identity has been 'VERIFIED'. Please continue to monitor your ODIN Claim Portal dashboard for any additional changes. We will attempt to notify you when you can withdraw your ODIN.`, `Your ODIN Claim status has been updated to: 'VERIFIED'. Check your dashboard for details.`));
       }
 
       identity['identity_status']   = 'verified';
       identity.user['claim_status'] = 'verified';
     }
+    else if (req.body['event'] === 'request.invalid') {
+      debug('Shuftipro Identity Callback -- INVALID');
+      // INVALID
+
+      if (identity['notified'] === false && identity['identity_status'] != 'invalid') {
+        debug('Shuftipro Identity Callback - Send Claim Notification');
+        identity['notified'] = true;
+        flagPromises.push(identity.user.sendClaimUpdate('ODIN Claim Status Updated', `This is a notification to let you know that the status of your recent identity submission on the ODIN Claim Portal has been updated. Our provider has accepted your information but has deemed it 'INVALID'. Please provide new information or attempt to resubmit your identity information again.`, `Your ODIN Claim status has been updated to: 'INVALID'. Check your dashboard for details.`));
+        flagPromises.push(Flag.addFlag(identity.user._id, 'identityVerification', 'invalid_identity', { reference_id: identity['reference_id'] }));
+      }
+
+      identity['identity_status']   = 'invalid';
+      identity.user['claim_status'] = 'invalid';
+    }
+    else if (req.body['event'] === 'verification.declined') {
+      debug('Shuftipro Identity Callback -- DECLINED');
+      // DECLINED
+
+      if (identity['notified'] === false && identity['identity_status'] != 'declined') {
+        debug('Shuftipro Identity Callback - Send Claim Notification');
+        identity['notified'] = true;
+        flagPromises.push(identity.user.sendClaimUpdate('ODIN Claim Status Updated', `This is a notification to let you know that the status of your recent identity submission on the ODIN Claim Portal has been updated. Our provider has accepted your information but has 'DECLINED' your verification. Please provide new information or attempt to resubmit your identity information again.`, `Your ODIN Claim status has been updated to: 'DECLINED'. Check your dashboard for details.`));
+        flagPromises.push(Flag.addFlag(identity.user._id, 'identityVerification', 'declined_identity', { reference_id: identity['reference_id'] }));
+      }
+
+      identity['identity_status']   = 'declined';
+      identity.user['claim_status'] = 'declined';
+    }
     else {
-      identity['identity_status']   = 'rejected';
-      identity.user['claim_status'] = 'rejected';
-      flagPromises.push(Flag.addFlag(identity.user._id, 'identityVerification', 'rejected_identity', { reference_id: identity['reference_id'] }));
+      identity['identity_status']   = 'pending';
+      identity.user['claim_status'] = 'pending';
     }
 
     Promise.all(flagPromises)
@@ -229,9 +245,10 @@ module.exports.submitIdentity = (req, res, next) => {
         return next(err_kyc);
       }
 
-      console.log('2', req.body);
+      debug(`Submit User Identity - user:${userId}
+      Request: ${JSON.stringify(req.body)}`);
     
-      let idSignature = Identity.HashSign(req.body['kyc_id']);
+      let idSignature = Identity.HashSign(req.body['kyc_identity_id']);
       console.log('UNIQUE SIGNATURE', idSignature);
 
       Identity.findOne({ reference_secret: idSignature })
@@ -259,13 +276,15 @@ module.exports.submitIdentity = (req, res, next) => {
           if (!req.files) return res.status(400).json({ status: 'error', message: 'missing_identity_images' });
           if (!req.files['kyc_document']) return res.status(400).json({ status: 'error', message: 'missing_identity_document' });
           if (!req.files['kyc_selfie']) return res.status(400).json({ status: 'error', message: 'missing_identity_selfie' });
-  
+          if (!req.files['kyc_address']) return res.status(400).json({ status: 'error', message: 'missing_identity_address' });
+          
           debug(`
           Process User Identity - user:${userId}
             User: ${JSON.stringify(req.body)}
             Files:
               Document: ${req.files['kyc_document'][0].originalname} (${req.files['kyc_document'][0].mimetype}) ${req.files['kyc_document'][0].size} bytes
               Selfie:   ${req.files['kyc_selfie'][0].originalname} (${req.files['kyc_selfie'][0].mimetype}) ${req.files['kyc_selfie'][0].size} bytes
+              Address:   ${req.files['kyc_address'][0].originalname} (${req.files['kyc_address'][0].mimetype}) ${req.files['kyc_address'][0].size} bytes
           `);
   
           /*
@@ -273,28 +292,35 @@ module.exports.submitIdentity = (req, res, next) => {
   
             Your customer needs to display their Identity Card. It could be government, school and/or university issued ID card. Shufti Pro verifies the validity of such ID card by cross checking the information (customer's name and date of birth) provided in the request with that on the ID card.
           */
-          let kyc_doc_type = ((doc_type) => {
+          let kyc_identity_type = ((doc_type) => {
             switch(doc_type) {
               case 'passport': return 'passport';
               case 'driving_license': return 'driving_license';
               case 'id': return 'id_card';
               default: return 'id_card';
             }
-          })(req.body['kyc_type']);
-  
-          let kyc_services = {
-            "document_type":      kyc_doc_type,
-            "document_id_no":     req.body['kyc_id'],
-            "first_name":         req.body['kyc_first_name'],
-            "last_name":          req.body['kyc_last_name'],
-            "dob":                req.body['kyc_birth_date'],
-            "background_checks":  "1"
-          };
-  
+          })(req.body['kyc_identity_type']);
+
+          let kyc_address_type = ((doc_type) => {
+            switch(doc_type) {
+              case 'id': return 'id_card';
+              case 'bank': return 'bank_statement';
+              case 'utility': return 'utility_bill';
+              default: return 'id_card';
+            }
+          })(req.body['kyc_address_type']);
+
           let kyc_user_details = {
-            "email":        user.email,
-            "country":      req.body['kyc_country_code'],
-            "phone_number": `+${user.phoneNumber}`
+            'first_name':               req.body['kyc_first_name'],
+            'last_name':                req.body['kyc_last_name'],
+            'full_address':             req.body['kyc_full_address'],
+            'email':                    user.email,
+            'country':                  req.body['kyc_country_code'],
+            'phone_number':             `+${user.phoneNumber}`,
+            'dob':                      req.body['kyc_birth_date'], // 'YYYY-MM-DD'
+            'address_document_type':    kyc_address_type,
+            'identity_document_type':   kyc_identity_type,
+            'identity_document_number': req.body['kyc_identity_id']
           };
           
           try {
@@ -307,6 +333,11 @@ module.exports.submitIdentity = (req, res, next) => {
               debug('KYC Rejected -- document missing');
               return res.status(400).json({ status: 'error', message: 'missing_identity_document' });
             }
+
+            if (typeof req.files['kyc_address'] === 'undefined') {
+              debug('KYC Rejected -- address missing');
+              return res.status(400).json({ status: 'error', message: 'missing_identity_address' });
+            }
           } catch(e) {
             console.log('Unable to process identity files', e);
             return res.status(500).json({ status: 'error', message: 'unprocessable' });
@@ -314,20 +345,22 @@ module.exports.submitIdentity = (req, res, next) => {
           
           Promise.all([
             bufferToBase64(req.files['kyc_selfie'][0]['buffer']),
-            bufferToBase64(req.files['kyc_document'][0]['buffer'])
+            bufferToBase64(req.files['kyc_document'][0]['buffer']),
+            bufferToBase64(req.files['kyc_address'][0]['buffer'])
           ])
-          .then(([selfieBase64, documentBase64]) => {
+          .then(([selfieBase64, documentBase64, addressBase64]) => {
             debug(`User Identity Files Ready - user:${userId}`);
             
             // let selfieSrcBase64   = req.files['kyc_selfie'][0]['buffer'].toString('base64');
             // let documentSrcBase64 = req.files['kyc_document'][0]['buffer'].toString('base64');
   
             let kyc_images = {
-              face_image: selfieBase64,
-              document_front_image: documentBase64
+              face_image:     selfieBase64,
+              document_image: documentBase64,
+              address_image:  addressBase64
             };
   
-            kyc.submitKYC(user, kyc_user_details, kyc_services, kyc_images)
+            kyc.submitKYC(user, kyc_user_details, kyc_images)
             .then((response) => {
               if (response.status === 'ok') {
                 
@@ -356,7 +389,6 @@ module.exports.submitIdentity = (req, res, next) => {
                 res.json({
                   status: 'ok',
                   identity: kyc_user_details,
-                  services: kyc_services,
                   serverResponse: JSON.stringify(response)
                 });
               }
@@ -364,7 +396,6 @@ module.exports.submitIdentity = (req, res, next) => {
                 res.json({
                   status: 'error',
                   identity: kyc_user_details,
-                  services: kyc_services,
                   message: response.reason,
                   serverResponse: JSON.stringify(response)
                 });
@@ -377,7 +408,6 @@ module.exports.submitIdentity = (req, res, next) => {
               res.json({
                 status: 'error',
                 identity: kyc_user_details,
-                services: kyc_services,
                 message: errMessage
               });
             });
