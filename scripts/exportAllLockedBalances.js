@@ -61,6 +61,8 @@ db.connect(dbString)
       console.log(`Exported Subscribed Claimants:
       ${csv.join('\r\n')}`);
 
+      console.log(`Total Rows: ${csv.length}`);
+
       setTimeout(() => {
         process.exit(1);
       }, 5000);
