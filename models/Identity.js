@@ -2,8 +2,9 @@ const mongoose  = require('mongoose');
 const Schema    = mongoose.Schema;
 const moment    = require('moment');
 const settings  = require('../config/');
-const crypto = require('crypto');
+const crypto    = require('crypto');
 const uuid      = require('../lib/uuid');
+const debug     = require('debug')('odin-portal:model:identity');
 
 /**
  * Schema for User Identities
@@ -68,7 +69,9 @@ IdentitySchema.statics.SHA256Sign = (rawData, unique) => {
 };
 
 IdentitySchema.statics.HashSign = (rawData) => {
-  console.log(`--hashsign ${rawData}`);
+  if (!rawData) rawData = moment().utc();
+
+  debug(`hashsign :: ${rawData}`);
   return crypto.createHash('sha256').update(rawData).digest('base64');
 };
 
