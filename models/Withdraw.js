@@ -78,6 +78,8 @@ WithdrawSchema.virtual('requested_formatted').get(function() {
 WithdrawSchema.virtual('sent_formatted').get(function() {
   if (this.sent_timestamp > 0)
     return moment(this.sent_timestamp).format('YYYY-MM-DD HH:mm:ss');
+  else if (this.sent_timestamp === -1)
+    return 'rejected';
   else
     return 'pending';
 });

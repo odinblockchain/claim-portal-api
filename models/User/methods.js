@@ -15,9 +15,8 @@ const speakeasy       = require('speakeasy');
 const moment          = require('moment');
 const Nexmo           = require('nexmo');
 const BlockedNumbers  = require('../../lib/blockedNumbers');
-const request         = require('request');
-const Snapshot        = require('../data/snapshot.json');
-// const User      = mongoose.model('User');
+const request         = require('request');;
+const Push            = mongoose.model('Push');
 
 function generatePin(max) {
   if (typeof max === 'undefined') max = 4;
@@ -352,7 +351,11 @@ module.exports = function(UserSchema) {
   
       debug('Moving Funds to Claim Address...', params);
   
-      request({ uri: uri, json: true, qs: params }, (err, response, body) => {
+      let username = settings['coind_auth']['client'];
+      let password = settings['coind_auth']['secret'];
+      let auth = `Basic ${new Buffer(username + ":" + password).toString("base64")}`;
+
+      request({ uri: uri, qs: params, headers: { 'Authorization': auth } }, (err, response, body) => {
         debug('API', {
           error:    (err) ? err.message : '',
           response: (response) ? response.statusCode : '',
@@ -430,7 +433,11 @@ module.exports = function(UserSchema) {
   
       debug('Setup::WalletAddress', params);
   
-      request({ uri: uri, json: true, qs: params }, (err, response, body) => {
+      let username = settings['coind_auth']['client'];
+      let password = settings['coind_auth']['secret'];
+      let auth = `Basic ${new Buffer(username + ":" + password).toString("base64")}`;
+
+      request({ uri: uri, qs: params, headers: { 'Authorization': auth } }, (err, response, body) => {
         debug('API', {
           error:    (err) ? err.message : '',
           response: (response) ? response.statusCode : '',
@@ -500,20 +507,8 @@ module.exports = function(UserSchema) {
       if (Number(user.balance_locked_sum) > 150000) {
         user.claim_status = 'declined';
       }
-      else {
-        let snapshotAddress = Snapshot['addressList'].find((addr) => {
-          return addr['address'] === user.wallet;
-        });
-
-        if (!snapshotAddress) {
-          user.claim_status = 'declined';
-        }
-        else {
-          let diff = Number(user.balance_locked_sum) - Number(snapshotAddress.balance);
-          if (diff >= 1000) user.claim_status = 'declined';
-
-          user.balance_locked_diff = diff;
-        }
+      else if (user.balance_locked_diff >= 1000) {
+        user.claim_status = 'declined';
       }
 
       let SMS = '';
@@ -1354,68 +1349,25 @@ module.exports = function(UserSchema) {
 
     let user = this;
 
-    debug(`Send SMS - user:${user._id}
-    Message: ${message}`);
+    debug(`Send SMS
+    User:     ${user.claimId}
+    Message:  ${message}`);
 
     return new Promise((resolve, reject) => {
       if (!message) return resolve(false);
 
-      const from  = settings.integrations.nexmo.number;
-      const to    = user.phoneNumber;
-      const text  = message.substr(0, 120); // ensure message is a little under the limit (160)
-
-      debug(`Sending SMS:
-      from: ${from}
-      to:   ${to}
-      text: ${text}
-      id:   ${user._id}`);
-
-      nexmo.message.sendSms(from, to, text, (err, result) => {
-        if (err) {
-          debug('SMS Auth Request Err', err);
-          return reject(err);
-        }
-  
-        debug('SMS Result', result);
-
-        if (result && Number(result.messages[0]['remaining-balance']) <= 3) {
-          let balance = Number(result.messages[0]['remaining-balance']);
-          debug(`TRIGGER WARNING -- Nexmo Balance LOW ${balance}`);
-          Raven.captureMessage('SMS Nexmo Balance Low', {
-            level: 'warning',
-            logger: 'User.Methods.sendSMSAuth',
-            extra: {
-              balance: balance
-            }
-          });
-        }
-
-        /**
-         *  {
-         *    'message-count': '1',
-              messages: [
-                {
-                  to: '13125506948',
-                  'message-id': '0B000000E170D22C',
-                  status: '0',
-                  'remaining-balance': '1.95860000',
-                  'message-price': '0.00570000',
-                  network: '310004'
-                }
-              ]
-            }
-        */
-
-        if (result && result.messages[0].status == '0') {
-          resolve(result);
+      Push.SendPush(user, message)
+      .then((queued) => {
+        if (queued) {
+          debug(`Send SMS :: IN QUEUE - user:${user.claimId}`);
+          return resolve(queued);
         }
         else {
-          let errMessage = (result && result.error_text) ? result.error_text : 'NO_RESPONSE';
-          debug(errMessage);
-          console.log(result);
-          reject(new Error(errMessage));
+          debug(`Send SMS :: NO QUEUE - user:${user.claimId}`);
+          return reject(new Error('SMS Queue rejected'));
         }
-      });
+      })
+      .catch(reject);
     });
   }
 
