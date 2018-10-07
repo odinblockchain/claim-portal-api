@@ -34,7 +34,7 @@ let updateUser = (user) => {
     });
     
     if (!snapshotAddress) {
-      debug(`Address not found (${user._id})`, err);
+      debug(`Address not found (${user._id})`);
       return resolve(false);
     }
     else {
