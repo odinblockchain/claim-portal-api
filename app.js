@@ -12,7 +12,8 @@ const logger          = require('morgan');
 const bodyParser      = require('body-parser');
 const formData = require("express-form-data");
 const os = require("os");
-const coindApi        = require('xxl-coind-express-api');
+// const coindApi        = require('xxl-coind-express-api');
+const coindApi        = require('./lib/coind');
 const debug           = require('debug')('odin-portal:app');
 const session         = require('express-session');
 const settings        = require('./config/');
@@ -187,11 +188,17 @@ app.use(express.urlencoded({ extended: true }));
 // app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 
 // Setup xxl-coind-express middleware
-let allowedMethods = ['verifymessage'];
+let allowedMethods = ['verifymessage', 'validateaddress'];
+let secureMethods  = ['move', 'sendfrom', 'getaccountaddress'];
 let walletSettings = settings.wallet;
 
 app.set('coindAllowedMethods', allowedMethods);
+app.set('coindSecureMethods', secureMethods);
 app.set('coindRPCSettings', walletSettings); 
+app.set('coindAuth', {
+  client: settings['coind_auth']['client'],
+  secret: settings['coind_auth']['secret']
+});
 app.use('/api/blockchain', coindApi);
 
 // nginx.conf: proxy_set_header  X-Real-IP  $remote_addr;

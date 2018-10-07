@@ -37,7 +37,8 @@ const UserSchema = new Schema({
     type: String, default: 'user'
   },
  
-  // Status of their claim (pending|rejected|accepted|verified)
+  // Status of their claim
+  // (pending|accepted|declined|approved)
   claim_status: {
     type: String, default: 'pending'
   },
@@ -45,6 +46,22 @@ const UserSchema = new Schema({
   // Wallet address associated with user
   claim_address: {
     type: String, default: ''
+  },
+
+  // Wallet balance associated with user
+  claim_balance: {
+    type: Number, default: 0
+  },
+
+  // Wallet has been setup (address created, balanced funded)
+  claim_setup: {
+    type: Boolean, default: false
+  },
+
+  // Identity Status
+  // (pending|invalid|rejected|accepted)
+  identity_status: {
+    type: String, default: 'pending'
   },
 
   // Timestamp of request start
@@ -148,6 +165,10 @@ const UserSchema = new Schema({
   },
   
   balance_locked_sum: {
+    type: Number, default: 0
+  },
+
+  balance_locked_diff: {
     type: Number, default: 0
   },
 

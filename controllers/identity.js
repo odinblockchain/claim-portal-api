@@ -114,17 +114,6 @@ module.exports.callback = (req, res, next) => {
   Callback Data:
   ${JSON.stringify(req.body)}`);
 
-  // if (!Identity.ValidateSignature(req.body)) {
-  //   debug(`Shuftipro Identity Callback - Invalid Signature`);
-  //   console.log(req.body);
-  //   Raven.captureMessage('Identity Signature Rejected', {
-  //     level: 'warn',
-  //     body: req.body
-  //   });
-
-  //   return res.send('ok');
-  // }
-
   Identity.findOne({ reference_id: req.body['reference'] })
   .populate('user')
   .exec((err, identity) => {
@@ -137,51 +126,22 @@ module.exports.callback = (req, res, next) => {
     let flagPromises = [];
     if (req.body['event'] === 'verification.accepted') {
       debug('Shuftipro Identity Callback -- ACCEPTED');
-      // VERIFIED AND ACCEPTED
-
-      if (identity['notified'] === false && identity['identity_status'] != 'verified') {
-        debug('Shuftipro Identity Callback - Send Claim Notification');
-        identity['notified'] = true;
-        flagPromises.push(identity.user.sendClaimUpdate('ODIN Claim Status Updated', `This is a notification to let you know that the status of your recent identity submission on the ODIN Claim Portal has been updated. Our provider has accepted your documents and your identity has been 'VERIFIED'. Please continue to monitor your ODIN Claim Portal dashboard for any additional changes. We will attempt to notify you when you can withdraw your ODIN.`, `Your ODIN Claim status has been updated to: 'VERIFIED'. Check your dashboard for details.`));
-      }
-
-      identity['identity_status']   = 'verified';
-      identity.user['claim_status'] = 'verified';
+      identity['identity_status'] = 'accepted';
     }
     else if (req.body['event'] === 'request.invalid') {
       debug('Shuftipro Identity Callback -- INVALID');
-      // INVALID
-
-      if (identity['notified'] === false && identity['identity_status'] != 'invalid') {
-        debug('Shuftipro Identity Callback - Send Claim Notification');
-        identity['notified'] = true;
-        flagPromises.push(identity.user.sendClaimUpdate('ODIN Claim Status Updated', `This is a notification to let you know that the status of your recent identity submission on the ODIN Claim Portal has been updated. Our provider has accepted your information but has deemed it 'INVALID'. Please provide new information or attempt to resubmit your identity information again.`, `Your ODIN Claim status has been updated to: 'INVALID'. Check your dashboard for details.`));
-        flagPromises.push(Flag.addFlag(identity.user._id, 'identityVerification', 'invalid_identity', { reference_id: identity['reference_id'] }));
-      }
-
-      identity['identity_status']   = 'invalid';
-      identity.user['claim_status'] = 'invalid';
+      identity['identity_status'] = 'invalid';
     }
     else if (req.body['event'] === 'verification.declined') {
       debug('Shuftipro Identity Callback -- DECLINED');
-      // DECLINED
-
-      if (identity['notified'] === false && identity['identity_status'] != 'declined') {
-        debug('Shuftipro Identity Callback - Send Claim Notification');
-        identity['notified'] = true;
-        flagPromises.push(identity.user.sendClaimUpdate('ODIN Claim Status Updated', `This is a notification to let you know that the status of your recent identity submission on the ODIN Claim Portal has been updated. Our provider has accepted your information but has 'DECLINED' your verification. Please provide new information or attempt to resubmit your identity information again.`, `Your ODIN Claim status has been updated to: 'DECLINED'. Check your dashboard for details.`));
-        flagPromises.push(Flag.addFlag(identity.user._id, 'identityVerification', 'declined_identity', { reference_id: identity['reference_id'] }));
-      }
-
-      identity['identity_status']   = 'declined';
-      identity.user['claim_status'] = 'declined';
+      identity['identity_status'] = 'declined';
     }
     else {
-      identity['identity_status']   = 'pending';
-      identity.user['claim_status'] = 'pending';
+      debug('Shuftipro Identity Callback -- PENDING');
+      identity['identity_status'] = 'pending';
     }
 
-    Promise.all(flagPromises)
+    identity.user.updateClaimStatus(identity['identity_status'])
     .then(() => {
       identity['updated_at'] = moment().utc();
       identity.save((err, _saved) => {
@@ -196,20 +156,7 @@ module.exports.callback = (req, res, next) => {
           });
         }
 
-        identity.user.save((err, _savedUser) => {
-          if (!err) debug(`Shuftipro Identity Callback - User Updated`);
-          if (err) {
-            debug(`Shuftipro Identity Callback - Error`);
-            console.log(err);
-            Raven.captureMessage('Identity Update Error', {
-              level: 'error',
-              body: req.body,
-              extra: err
-            });
-          }
-
-          res.send('ok');
-        });
+        res.send('ok');
       });
     })
     .catch((err) => {
@@ -363,41 +310,15 @@ module.exports.submitIdentity = (req, res, next) => {
             kyc.submitKYC(user, kyc_user_details, kyc_images)
             .then((response) => {
               if (response.status === 'ok') {
-                
-                // if (identity['identity_status'] === 'rejected')
-                //   user['claim_status'] = 'rejected';
-                // else if (identity['identity_status'] === 'accepted')
-                //   user['claim_status'] = 'pending';
-                // else if (identity['identity_status'] === 'verified')
-                //   user['claim_status'] = 'accepted';
-  
-                // user.save((err, _savedUser) => {
-                //   if (!err) debug(`Shuftipro Identity Callback - User Updated`);
-                //   if (err) {
-                //     debug(`Shuftipro Identity Callback - Error`);
-                //     console.log(err);
-                //     Raven.captureMessage('Identity Update Error', {
-                //       level: 'error',
-                //       body: req.body,
-                //       extra: err
-                //     });
-                //   }
-  
-                //   res.send('ok');
-                // });
-                
                 res.json({
                   status: 'ok',
-                  identity: kyc_user_details,
-                  serverResponse: JSON.stringify(response)
+                  result: response.event
                 });
               }
               else {
                 res.json({
                   status: 'error',
-                  identity: kyc_user_details,
-                  message: response.reason,
-                  serverResponse: JSON.stringify(response)
+                  result: response.event
                 });
               }
             })
@@ -407,7 +328,6 @@ module.exports.submitIdentity = (req, res, next) => {
   
               res.json({
                 status: 'error',
-                identity: kyc_user_details,
                 message: errMessage
               });
             });

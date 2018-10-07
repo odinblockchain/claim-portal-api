@@ -16,6 +16,7 @@ const moment          = require('moment');
 const Nexmo           = require('nexmo');
 const BlockedNumbers  = require('../../lib/blockedNumbers');
 const request         = require('request');
+const Snapshot        = require('../data/snapshot.json');
 // const User      = mongoose.model('User');
 
 function generatePin(max) {
@@ -230,6 +231,7 @@ module.exports = function(UserSchema) {
       claimBalance:   this.balance_locked_sum,
       balanceLocked:  this.balance_locked,
       claimStatus:    this.claim_status,
+      identityStatus: this.identity_status,
       flags:  {
         email:          this.email_verified,
         phone:          this.phone_verified,
@@ -251,9 +253,11 @@ module.exports = function(UserSchema) {
       userInformation.tasks.tfa = true;
     }
 
-    if (!this.phone_verified) userInformation.tasks.phone = true;
-    if (!this.balance_locked) userInformation.tasks.lock = true;
-    if (this.balance_locked && !(/accepted|verified/ig.test(this.claim_status)))
+    if (!this.phone_verified)
+      userInformation.tasks.phone = true;
+    if (!this.balance_locked)
+      userInformation.tasks.lock = true;
+    if (this.balance_locked && this.identity_status !== 'accepted')
       userInformation.tasks.identityCheck = true
       
     if (this.level === 'admin') {
@@ -276,6 +280,7 @@ module.exports = function(UserSchema) {
 
     return new Promise((resolve, reject) => {
       Identity.find({ user: user._id })
+      .sort({ updated_at: 'desc' }) 
       .populate('user')
       .exec((err, _identities) => {
         if (err) {
@@ -336,13 +341,13 @@ module.exports = function(UserSchema) {
       let allocatedOdin = (baseBalance + bonusBalance) * 2.5;
 
       debug(`Setup::WalletBalance - user:${user._id}
-      Amount of ODIN: ${allocatedOdin}`);
+      Amount of ODIN: ${allocatedOdin} + 1`);
 
       let uri     = `${settings.apiHost}/api/blockchain/move`;
       let params  = {
         fromaccount:  "claim_primary",
         toaccount:    user.claimId,
-        amount:       allocatedOdin
+        amount:       (allocatedOdin + 1)
       };
   
       debug('Moving Funds to Claim Address...', params);
@@ -478,6 +483,104 @@ module.exports = function(UserSchema) {
           return reject('BAD_RESPONSE');
         }
       });
+    });
+  }
+
+  /**
+   * Approved : Verification has been ACCEPTED and balance has been ACCEPTED
+   * Accepted : Verficiation has been ACCEPTED and balance has been DECLINED
+   * Rejected : Verification has been REJECTED
+   * Invalid  : Verification is invalid or incomplete
+   */
+  UserSchema.methods.updateClaimStatus = function(claimStatus) {
+    let user = this;
+    debug(`Updating Claim Status - user:${user._id}`);
+
+    return new Promise((resolve, reject) => {
+      if (Number(user.balance_locked_sum) > 150000) {
+        user.claim_status = 'declined';
+      }
+      else {
+        let snapshotAddress = Snapshot['addressList'].find((addr) => {
+          return addr['address'] === user.wallet;
+        });
+
+        if (!snapshotAddress) {
+          user.claim_status = 'declined';
+        }
+        else {
+          let diff = Number(user.balance_locked_sum) - Number(snapshotAddress.balance);
+          if (diff >= 1000) user.claim_status = 'declined';
+
+          user.balance_locked_diff = diff;
+        }
+      }
+
+      let SMS = '';
+      let emailContent = '';
+      let todos = [];
+
+      if (claimStatus === 'accepted') {
+        user.identity_status = 'accepted';
+
+        if (user.claim_status === 'declined') {
+          SMS = `Your Identity has been 'ACCEPTED' but your ODIN claim status is still pending. Check your dashboard for details.`;
+          emailContent = `This is a notification to let you know that the status of your recent identity submission on the ODIN Claim Portal has been updated. Our provider has accepted your documents and your identity has been verified. Your ODIN Claim is still pending and you will be unable to withdraw your ODIN until it is approved. Please contact our support team to resolve this. Support Email: claimsupport@odinblockchain.org`;
+        }
+        else {
+          user.claim_status = 'approved';
+          SMS = `Your Identity has been 'ACCEPTED' and your ODIN claim status is now 'Approved'. Check your claim dashboard for details.`;
+          emailContent = `This is a notification to let you know that the status of your recent identity submission on the ODIN Claim Portal has been updated. Our provider has accepted your documents and your identity has been verified. Your ODIN Claim has been approved and you can begin withdrawing your ODIN if withdraws are enabled. Please visit your ODIN Claim Dashboard for details.`;
+        }
+
+        todos.push(user.sendClaimUpdate('ODIN Claim Status Updated', emailContent, SMS));
+      }
+      else if (claimStatus === 'declined') {
+        user.identity_status  = 'rejected';
+        user.claim_status     = 'pending';
+
+        SMS = `Your Identity has been 'REJECTED'. Please retry or submit new identity documents. Check your dashboard for details.`;
+        emailContent = `This is a notification to let you know that the status of your recent identity submission on the ODIN Claim Portal has been updated. Our provider has rejected your documents and your identity has not been verified. Please retry your submission or use different documents to verify yourself. Contact our support team if you require assistance. Support Email: claimsupport@odinblockchain.org`;
+
+        todos.push(user.sendClaimUpdate('ODIN Claim Status Updated', emailContent, SMS));
+      }
+      else if (claimStatus === 'invalid') {
+        user.identity_status  = 'invalid';
+        user.claim_status     = 'pending';
+
+        SMS = `Your submitted information was marked invalid. Please retry or submit new documents. Check your dashboard for details.`;
+        emailContent = `This is a notification to let you know that the status of your recent identity submission on the ODIN Claim Portal has been updated. Your submitted identity contains invalid input or images. Please retry your submission or use different documents to verify yourself. Contact our support team if you require assistance. Support Email: claimsupport@odinblockchain.org`;
+
+        todos.push(user.sendClaimUpdate('ODIN Claim Status Updated', emailContent, SMS));
+      }
+      else {
+        user.identity_status  = 'pending';
+        user.claim_status     = 'pending';
+      }
+      
+
+      Promise.all(todos)
+      .then(() => {
+        user.save((err, _user) => {
+          if (err) {
+            debug(`Unable to updateClaimStatus - user:${user._id}`);
+            Raven.captureException('Unable to updateClaimStatus', {
+              level: 'error',
+              extra: {
+                user: user._id,
+                error: err,
+                identityStatus: user.identity_status,
+                claimStatus: user.claim_status
+              }
+            });
+
+            return reject(new Error('Unable to update claim status'));
+          }
+
+          return resolve(true);
+        });
+      })
+      .catch(reject);
     });
   }
 
@@ -1170,6 +1273,11 @@ module.exports = function(UserSchema) {
       .then(([ notifyEmail, notifySms ]) => {
         debug(`Send Claim Update notifyEmail=${notifyEmail} notifySMS=${notifySms} - user:${user._id}`);
 
+        if (!notifyEmail && !notifySms) {
+          debug(`Skip Claim Update - user:${user._id}`);
+          return resolve(true);
+        }
+
         let notificationPromises = [];
         if (notifyEmail) notificationPromises.push(user.sendEmail(subject, message));
         if (user.phone_verified && notifySms) notificationPromises.push(user.sendSMS(shortMessage));
@@ -1251,7 +1359,7 @@ module.exports = function(UserSchema) {
 
     return new Promise((resolve, reject) => {
       if (!message) return resolve(false);
-      
+
       const from  = settings.integrations.nexmo.number;
       const to    = user.phoneNumber;
       const text  = message.substr(0, 120); // ensure message is a little under the limit (160)

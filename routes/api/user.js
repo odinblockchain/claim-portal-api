@@ -43,6 +43,9 @@ router.get('/getNotifications', auth, UserController.getNotifications);
 router.get('/enableClaimLock', auth, UserController.enableClaimLock);
 router.get('/registrationOpen', UserController.registerCheck);
 router.get('/identityChecks', auth, UserController.fetchIdentities);
+router.get('/wallet', auth, UserController.fetchWallet);
+router.get('/walletRequests', auth, UserController.fetchWalletRequests);
+router.post('/walletWithdraw', auth, UserController.walletWithdraw);
 
 // router.get('/user', (req, res, next) => {
 //   User.findOne({ email: 'email2@website.com' })

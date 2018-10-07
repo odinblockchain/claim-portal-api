@@ -40,6 +40,10 @@ require("./statics.js")(UserSchema);
 // UserSchema Class methods
 require("./methods.js")(UserSchema);
 
+UserSchema.virtual('claimId').get(function() {
+  return this._id.toString()
+});
+
 UserSchema.virtual('greeting').get(function() {
   return `Greetings ${this.name}!`;
 });

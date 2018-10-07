@@ -5,10 +5,13 @@ const debug         = require('debug')('odin-portal:controller:user');
 const AuthIP        = mongoose.model('AuthIP');
 const Flag          = mongoose.model('Flag');
 const Request       = mongoose.model('Request');
+const Withdraw      = mongoose.model('Withdraw');
 const Notification  = mongoose.model('Notification');
 const moment        = require('moment');
 const metrics       = require('../lib/metrics');
 const Raven         = require('raven');
+// const snapshot      = require('../data');
+// const Snapshot = require('../data/snapshot.json');
 
 function parseUserAuthHeader(req) {
   try {
@@ -507,6 +510,128 @@ module.exports.fetchIdentities = (req, res, next) => {
       res.json({ status: 'ok', checks: response });
     })
     .catch(next);
+  });
+};
+
+module.exports.fetchWallet = (req, res, next) => {
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+
+  debug(`fetchWallet - user:${userId}`);
+
+  User.findById(userId)
+  .exec( (err, _user) => {
+    if (err) return next(err);
+    if (!_user) return next(new Error('Unauthorized'));
+
+    let todos = [];
+    if (!_user.claim_setup) todos.push(_user.setupWallet());
+    todos.push(Withdraw.FetchWithdrawRequests(userId));
+
+    Promise.all(todos)
+    .then((completedTodos) => {
+
+      if (todos.length == 2) [setup, withdraws] = completedTodos
+      if (todos.length == 1) [withdraws] = completedTodos
+
+      User.findById(userId)
+      .exec( (err, user) => {
+        if (err) return next(err);
+
+        let pendingBalance = 0;
+        if (withdraws.length) {
+          let pendingWithdraws = withdraws.filter((w) => {
+            return (w.rejected === false && w.tx === '');
+          });
+
+          pendingBalance = pendingWithdraws.reduce((total, w) => total + w.amount, 0);
+        }
+
+        res.json({
+          status:       'ok',
+          claimAddress: user.claim_address,
+          claimBalance: user.claim_balance,
+          pendingBalance: pendingBalance,
+          claimStatus:  user.claim_status,
+          withdraws:    withdraws
+        });
+      });
+    })
+    .catch((err) => {
+      debug(`Unable to fetchWallet - user:${userId}`);
+      console.log(err);
+      next(err);
+    });
+  });
+}
+
+module.exports.fetchWalletRequests = (req, res, next) => {
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+
+  debug(`fetchWalletRequests - user:${userId}`);
+
+  User.findById(userId)
+  .exec( (err, _user) => {
+    if (err) return next(err);
+    if (!_user) return next(new Error('Unauthorized'));
+
+    Withdraw.FetchWithdrawRequests(_user._id)
+    .then((requests) => {
+      res.json({
+        status:       'ok',
+        claimAddress: user.claim_address,
+        claimBalance: user.claim_balance,
+        claimStatus:  user.claim_status,
+        withdraws:    requests
+      });
+    })
+    .catch((err) => {
+      debug(`Unable to fetchWalletRequests - user:${userId}`);
+      console.log(err);
+      next(err);
+    });
+  });
+}
+
+module.exports.walletWithdraw = (req, res, next) => {
+  let userDetails = parseUserAuthHeader(req);
+  if (!userDetails.auth)
+    return res.status(401).json({ status: 'error', message: 'Request Unauthorised' });
+
+  let userId = userDetails.auth;
+
+  debug(`walletWithdraw - user:${userId}`);
+
+  User.findById(userId)
+  .exec( (err, _user) => {
+    if (err) return next(err);
+    if (!_user) return next(new Error('Unauthorized'));
+
+    let sendTo = escape_string(req.body['address']);
+    let amount = Number(req.body['amount']);
+
+    debug(`Requesting Withdraw - user:${userId}`);
+    Withdraw.RequestWithdraw(_user, sendTo, amount)
+    .then((withdrawRequest) => {
+      debug(`Got Withdraw Request - user:${userId}`);
+
+      return res.json({
+        status: 'ok'
+      });
+    })
+    .catch((err) => {
+      return res.json({
+        status: 'error',
+        message: (err.message) ? err.message : 'rejected'
+      });
+    });
   });
 }
 
