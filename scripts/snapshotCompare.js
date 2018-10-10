@@ -38,7 +38,7 @@ let updateUser = (user) => {
       return resolve(false);
     }
     else {
-      let diff = Number(user.balance_locked_sum) - Number(snapshotAddress.balance);
+      let diff = Number(snapshotAddress.balance) - Number(user.balance_locked_sum);
       differences.push(diff);
       differenceSum = differenceSum + diff;
       user.balance_locked_diff = diff;
@@ -59,7 +59,7 @@ db.connect(dbString)
 .then(() => {
   console.log('Working Snapshot Comparison...');
   
-  User.find()
+  User.find({})
   .populate('user')
   .exec((err, users) => {
     if (err) {

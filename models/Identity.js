@@ -15,10 +15,15 @@ const IdentitySchema = new Schema({
     ref: 'User'
   },
 
-  // (pending|rejected|accepted|verified)
+  // (pending|invalid|accepted)
   identity_status: {
     type: String,
     default: 'pending'
+  },
+
+  remarks: {
+    type: String,
+    default: ''
   },
   
   reference_id: {
@@ -86,6 +91,38 @@ IdentitySchema.statics.ValidateSignature = (requestResponse) => {
   return !!(rSignature === requestResponse.signature);
 };
 
+IdentitySchema.statics.FindByUser = (user) => {
+  debug(`Fetching Identities - user:${user.claimId}`);
+
+  let Identity = mongoose.model('Identity');
+
+  return new Promise((resolve, reject) => {
+
+    Identity.find({ user: user._id })
+    .sort({ created_at: -1 })
+    .exec((err, matchedIdentities) => {
+      if (err) {
+        console.log(`Unable to pull identities for user - ${user.claimId}`);
+        return reject(err);
+      }
+
+      if (matchedIdentities.length > 0) {
+        matchedIdentities = matchedIdentities.map(i => {
+          return {
+            identity_status: i.identity_status,
+            created_at: i.created_at,
+            updated_at: i.updated_at
+          }
+        });
+
+        return resolve(matchedIdentities);
+      }
+      else {
+        return resolve(matchedIdentities);
+      }
+    });
+  });
+}
 
 
 module.exports = mongoose.model('Identity', IdentitySchema);

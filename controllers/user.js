@@ -617,6 +617,8 @@ module.exports.walletWithdraw = (req, res, next) => {
     let sendTo = escape_string(req.body['address']);
     let amount = Number(req.body['amount']);
 
+    amount = Number(amount.toFixed(8));
+
     debug(`Requesting Withdraw - user:${userId}`);
     Withdraw.RequestWithdraw(_user, sendTo, amount)
     .then((withdrawRequest) => {

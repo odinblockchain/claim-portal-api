@@ -32,16 +32,28 @@ router.get('/', (req, res) => {
   .exec((err, alert) => {
     if (err) {
       console.log(err);
-      return res.json({ status: 'error', error: err });
+      return res.json({
+        status: 'error',
+        error: err,
+        api: req.app.locals.version
+      });
     }
 
     if (!alert) {
       console.log(err);
-      return res.json({ status: 'ok', alert: {} });
+      return res.json({
+        status: 'ok',
+        alert: {},
+        api: req.app.locals.version
+      });
     }
 
     // console.log(alert);
-    return res.json({ status: 'ok', alert: alert.formatted() });
+    return res.json({
+      status: 'ok',
+      alert: alert.formatted(),
+      api: req.app.locals.version
+    });
   });
 });
 

@@ -339,6 +339,9 @@ module.exports = function(UserSchema) {
       let bonusBalance  = Number(this.calculateTotalClaimBonus());
       let allocatedOdin = (baseBalance + bonusBalance) * 2.5;
 
+      // Ensure allocation is maxed at 8 decimal places
+      allocatedOdin = Number(allocatedOdin.toFixed(8));
+
       debug(`Setup::WalletBalance - user:${user._id}
       Amount of ODIN: ${allocatedOdin} + 1`);
 
@@ -504,10 +507,10 @@ module.exports = function(UserSchema) {
     debug(`Updating Claim Status - user:${user._id}`);
 
     return new Promise((resolve, reject) => {
-      if (Number(user.balance_locked_sum) > 150000) {
+      if (Number(user.balance_locked_sum) > settings['claim_redemption']['max_claim_limit']) {
         user.claim_status = 'declined';
       }
-      else if (user.balance_locked_diff >= 1000) {
+      else if (user.balance_locked_diff >= settings['claim_redemption']['max_balance_diff']) {
         user.claim_status = 'declined';
       }
 

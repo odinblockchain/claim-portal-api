@@ -180,12 +180,8 @@ if (env === 'production') {
 }
 
 // Parse JSON POST
-// app.use(formData.parse(formDataOpts));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-// app.use(formData.parse(formDataOpts));
-// app.use(bodyParser.json({ limit: '50mb' }));
-// app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
+app.use(bodyParser.json({ limit: '25mb', extended: true }));
+app.use(bodyParser.urlencoded({ limit: '25mb', extended: true }));
 
 // Setup xxl-coind-express middleware
 let allowedMethods = ['verifymessage', 'validateaddress'];
@@ -235,6 +231,13 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.use(passport.initialize());
 app.use('/api/v1', apiRouter);
+
+app.get('/', (req, res, next) => {
+  res.json({
+    status: 'ok',
+    version: req.app.locals.version
+  });
+});
 
 
 // Raven error handler must be before any other error middleware
