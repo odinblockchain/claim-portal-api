@@ -503,7 +503,8 @@ module.exports.fetchIdentities = (req, res, next) => {
       let response = identities.map((_id) => { 
         return {
           status:   _id.identity_status,
-          updated:  (_id.updated_at != 0) ? moment(_id.updated_at).format('YYYY-MM-DD HH:MM:SS') : 'pending'
+          remarks:  _id.remarks,
+          updated:  (_id.updated_at != 0) ? moment(_id.updated_at).format('DD.MM.YY HH:mm:ss') : 'pending'
         }
       });
 

@@ -504,7 +504,7 @@ module.exports = function(UserSchema) {
    */
   UserSchema.methods.updateClaimStatus = function(claimStatus) {
     let user = this;
-    debug(`Updating Claim Status - user:${user._id}`);
+    debug(`Updating Claim Status - user:${user._id} (${claimStatus})`);
 
     return new Promise((resolve, reject) => {
       if (Number(user.balance_locked_sum) > settings['claim_redemption']['max_claim_limit']) {

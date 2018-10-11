@@ -200,6 +200,24 @@ const findInvalidMark = function(marks) {
   return rejectedKey;
 };
 
+const parseCode = (code) => {
+  switch(code) {
+    case 'address.address_document': return 'Unable to accept Address document.';
+    case 'address.name': return 'Provided First and Last name could not be verified with Address.';
+    case 'address.full_address': return 'Provided address could not be verified.';
+    case 'background_checks': return 'Unable to verify your identity.';
+    case 'document.document': return 'Unable to accept Identity document.';
+    case 'document.document_country': return 'Provided country could not be verified with ID.';
+    case 'document.name': return 'Provided First and Last name could not be verified with ID.';
+    case 'document.dob': return 'Provided Date of Birth could not be verified with ID.';
+    case 'document.document_number': return 'Provided ID Number could not be verified with ID.';
+    case 'face.proof': return 'Unable to accept submitted face photo / selfie.';
+    case 'address.proof': return 'Unable to accept submitted address image.';
+    case 'document.proof': return 'Unable to accept submitted document image.';
+    default: return code;
+  }
+};
+
 const processRejectionReason = (response) => {
   try {
     if (typeof response === 'string') response = JSON.parse(response)
@@ -235,7 +253,7 @@ const processRejectionReason = (response) => {
     }
 
     let rejectionCode = findInvalidMark(result);
-    return rejectionCode;
+    return parseCode(rejectionCode);
   }
   else if (response.event === 'request.invalid') {
     if (!response.error)
@@ -291,7 +309,7 @@ const processRejectionReason = (response) => {
     }
 
     if (rejectionCode === '') return `${err.service}.${err.key}`;
-    else return rejectionCode;
+    return parseCode(rejectionCode);
   }
 
   return '';
