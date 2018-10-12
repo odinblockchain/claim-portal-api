@@ -15,7 +15,7 @@ const IdentitySchema = new Schema({
     ref: 'User'
   },
 
-  // (pending|invalid|accepted)
+  // (pending|invalid|declined|accepted)
   identity_status: {
     type: String,
     default: 'pending'
@@ -91,38 +91,56 @@ IdentitySchema.statics.ValidateSignature = (requestResponse) => {
   return !!(rSignature === requestResponse.signature);
 };
 
-IdentitySchema.statics.FindByUser = (user) => {
-  debug(`Fetching Identities - user:${user.claimId}`);
 
-  let Identity = mongoose.model('Identity');
+IdentitySchema.statics.FindByUser = function(user) {
+  debug(`Pulling Identities - user:${user.claimId}`);
 
+  let Identity = this;
   return new Promise((resolve, reject) => {
 
-    Identity.find({ user: user._id })
-    .sort({ created_at: -1 })
-    .exec((err, matchedIdentities) => {
-      if (err) {
-        console.log(`Unable to pull identities for user - ${user.claimId}`);
-        return reject(err);
-      }
+    Identity.find({ user: user.claimId })
+    .exec((err, identities) => {
+      if (err) return reject(err);
+      debug(`-- Found [${identities.length}] Identities - user:${user.claimId}`);
+      
+      if (!identities.length) return resolve(identities);
 
-      if (matchedIdentities.length > 0) {
-        matchedIdentities = matchedIdentities.map(i => {
-          return {
-            identity_status: i.identity_status,
-            created_at: i.created_at,
-            updated_at: i.updated_at
-          }
-        });
-
-        return resolve(matchedIdentities);
-      }
-      else {
-        return resolve(matchedIdentities);
-      }
+      identities = identities.map(i => {
+        return {
+          id:         i._id,
+          reference:  i.reference_id,
+          status:     i.identity_status,
+          remarks:    i.remarks,
+          created:    moment(i.created_at).format('YYYY-MM-DD HH:mm:ss'),
+          updated:    moment(i.updated_at).format('YYYY-MM-DD HH:mm:ss')
+        }
+      });
+      
+      return resolve(identities);
     });
   });
-}
+};
+
+IdentitySchema.statics.UpdateStatus = function(reference, status) {
+  debug(`Updating Identity - reference:${reference}`);
+
+  let Identity = this;
+  return new Promise((resolve, reject) => {
+
+    Identity.findOne({ reference_id: reference })
+    .exec((err, identity) => {
+      if (err) return reject(err);
+      if (!identity) return reject(new Error('identity_not_found'));
+      if (!/pending|invalid|declined|accepted|skip/.test(status)) return reject(new Error('invalid_status'));
+
+      identity.identity_status = status;
+      identity.save((err, _i) => {
+        if (err) return reject(err);
+        return resolve(_i);
+      });
+    });
+  });
+};
 
 
 module.exports = mongoose.model('Identity', IdentitySchema);

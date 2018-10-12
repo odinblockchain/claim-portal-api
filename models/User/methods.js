@@ -502,23 +502,27 @@ module.exports = function(UserSchema) {
    * Rejected : Verification has been REJECTED
    * Invalid  : Verification is invalid or incomplete
    */
-  UserSchema.methods.updateClaimStatus = function(claimStatus) {
+  UserSchema.methods.updateIdentityStatus = function(status, ignoreApprovals) {
+    if (typeof ignoreApprovals === 'undefined') ignoreApprovals = false;
+
     let user = this;
-    debug(`Updating Claim Status - user:${user._id} (${claimStatus})`);
+    debug(`Updating Identity Status - user:${user._id} (${status}) (${ignoreApprovals})`);
 
     return new Promise((resolve, reject) => {
-      if (Number(user.balance_locked_sum) > settings['claim_redemption']['max_claim_limit']) {
-        user.claim_status = 'declined';
-      }
-      else if (user.balance_locked_diff >= settings['claim_redemption']['max_balance_diff']) {
-        user.claim_status = 'declined';
+      if (user.claim_status !== 'approved' && !ignoreApprovals) {
+        if (Number(user.balance_locked_sum) > settings['claim_redemption']['max_claim_limit']) {
+          user.claim_status = 'declined';
+        }
+        else if (user.balance_locked_diff >= settings['claim_redemption']['max_balance_diff']) {
+          user.claim_status = 'declined';
+        }
       }
 
       let SMS = '';
       let emailContent = '';
       let todos = [];
 
-      if (claimStatus === 'accepted') {
+      if (status === 'accepted') {
         user.identity_status = 'accepted';
 
         if (user.claim_status === 'declined') {
@@ -533,7 +537,7 @@ module.exports = function(UserSchema) {
 
         todos.push(user.sendClaimUpdate('ODIN Claim Status Updated', emailContent, SMS));
       }
-      else if (claimStatus === 'declined') {
+      else if (status === 'declined' || status === 'rejected') {
         user.identity_status  = 'rejected';
         user.claim_status     = 'pending';
 
@@ -542,7 +546,7 @@ module.exports = function(UserSchema) {
 
         todos.push(user.sendClaimUpdate('ODIN Claim Status Updated', emailContent, SMS));
       }
-      else if (claimStatus === 'invalid') {
+      else if (status === 'invalid') {
         user.identity_status  = 'invalid';
         user.claim_status     = 'pending';
 
@@ -561,8 +565,8 @@ module.exports = function(UserSchema) {
       .then(() => {
         user.save((err, _user) => {
           if (err) {
-            debug(`Unable to updateClaimStatus - user:${user._id}`);
-            Raven.captureException('Unable to updateClaimStatus', {
+            debug(`Unable to updateIdentityStatus - user:${user._id}`);
+            Raven.captureException('Unable to updateIdentityStatus', {
               level: 'error',
               extra: {
                 user: user._id,
@@ -579,6 +583,71 @@ module.exports = function(UserSchema) {
         });
       })
       .catch(reject);
+    });
+  }
+
+  /**
+   * Approved : Verification has been ACCEPTED and balance has been ACCEPTED
+   * Accepted : Verficiation has been ACCEPTED and balance has been DECLINED
+   * Rejected : Verification has been REJECTED
+   * Invalid  : Verification is invalid or incomplete
+   */
+  UserSchema.methods.updateClaimStatus = function(claimStatus) {
+    let user = this;
+    debug(`Updating Claim Status - user:${user.claimId} (${claimStatus})`);
+
+    return new Promise((resolve, reject) => {
+      let SMS = '';
+      let emailContent = '';
+      let todos = [];
+
+      if (claimStatus === 'approved') {
+        user.claim_status = 'approved';
+
+        SMS = `Your ODIN Claim has been 'Approved'. Check your claim dashboard for details.`;
+        emailContent = `This is a notification to let you know that your ODIN Claim has been 'Approved' and you can begin withdrawing your ODIN if withdraws are enabled. Please visit your ODIN Claim Dashboard for details.`;
+
+        todos.push(user.sendClaimUpdate('ODIN Claim Status Updated', emailContent, SMS));
+      }
+      else if (claimStatus === 'declined') {
+        user.claim_status = 'declined';
+
+        SMS = `Your ODIN Claim has been 'Declined'. Check your claim dashboard for details.`;
+        emailContent = `This is a notification to let you know that your ODIN Claim has been 'Declined' please contact our support or visit your ODIN Claim Dashboard for details.`;
+
+        todos.push(user.sendClaimUpdate('ODIN Claim Status Updated', emailContent, SMS));
+      }
+      else {
+        user.claim_status = 'pending';
+
+        SMS = `Your ODIN Claim is still 'Pending'. Check your claim dashboard for details.`;
+        emailContent = `This is a notification to let you know that your ODIN Claim is still 'pending'. Please visit your ODIN Claim Dashboard for details.`;
+
+        todos.push(user.sendClaimUpdate('ODIN Claim Status Updated', emailContent, SMS));
+      }
+
+      user.save((err, _u) => {
+        if (err) {
+          debug(`Unable to updateClaimStatus - user:${user._id}`);
+          Raven.captureException('Unable to updateClaimStatus', {
+            level: 'error',
+            extra: {
+              user: user._id,
+              error: err,
+              identityStatus: user.identity_status,
+              claimStatus: user.claim_status
+            }
+          });
+
+          return reject(new Error('Unable to update claim status'));
+        }
+
+        Promise.all(todos)
+        .then(() => {
+          return resolve(true);
+        })
+        .catch(reject);
+      });
     });
   }
 
@@ -900,6 +969,20 @@ module.exports = function(UserSchema) {
         if (modified && modified.ok !== 1) return reject('NOT_MODIFIED');
         debug('user reset password token cleared');
         resolve(true);
+      });
+    });
+  }
+
+  UserSchema.methods.setLateLock = function(status) {
+    let user = this;
+  
+    return new Promise((resolve, reject) => {
+
+      user.allow_late_lock = status;
+      user.save((err, _user) => {
+        if (err) return reject(err);
+        if (!_user) return reject(new Error('Unable to save updated user details'));
+        return resolve(_user);
       });
     });
   }

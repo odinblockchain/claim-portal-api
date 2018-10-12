@@ -171,6 +171,10 @@ const UserSchema = new Schema({
   balance_locked_diff: {
     type: Number, default: 0
   },
+  
+  allow_late_lock: {
+    type: Boolean, default: false
+  },
 
   /**
    * User Acceptances

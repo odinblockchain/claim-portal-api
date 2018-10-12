@@ -16,6 +16,7 @@ const authRouter = require('./auth');
 const requestRouter = require('./request');
 const metricsRouter = require('./metrics');
 const alertRouter = require('./alert');
+const adminRouter = require('./admin');
 // const eventRouter = require('./event'); // TODO Better Event Metrics
 
 // custom validator objects
@@ -52,6 +53,7 @@ router.get('/countryCodes', (req, res, next) => {
 
 // implement API routes
 router.use('/user', userRouter);
+router.use('/admin', adminRouter);
 router.use('/identity', identityRouter);
 router.use('/auth', authRouter);
 router.use('/request', requestRouter);

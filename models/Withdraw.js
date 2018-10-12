@@ -165,4 +165,35 @@ WithdrawSchema.statics.FetchWithdrawRequests = function(userId) {
   });
 };
 
+WithdrawSchema.statics.FindByUser = function(user) {
+  debug(`Pulling Withdraws - user:${user.claimId}`);
+
+  let Withdraw = this;
+  return new Promise((resolve, reject) => {
+
+    Withdraw.find({ user: user.claimId })
+    .sort({ requested_timestamp: -1 })
+    .exec((err, withdraws) => {
+      if (err) return reject(err);
+      debug(`-- Found [${withdraws.length}] Withdraws - user:${user.claimId}`);
+      
+      if (!withdraws.length) return resolve(withdraws);
+
+      withdraws = withdraws.map(w => {
+        return {
+          id:         w._id,
+          amount:     w.amount,
+          to:         w.to,
+          timestamp:  w.sent_timestamp,
+          date:       moment(w.sent_timestamp).format('YYYY-MM-DD HH:mm:ss'),
+          txid:       w.tx,
+          rejected:   w.rejected
+        }
+      });
+      
+      return resolve(withdraws);
+    });
+  });
+};
+
 module.exports = mongoose.model('Withdraw', WithdrawSchema);

@@ -44,6 +44,26 @@ UserSchema.virtual('claimId').get(function() {
   return this._id.toString()
 });
 
+UserSchema.virtual('claim_bonuses').get(function() {
+  return Number(this.calculateTotalClaimBonus());
+});
+
+UserSchema.virtual('claim_calculated').get(function() {
+  let baseBalance   = Number(this.balance_locked_sum);
+  let bonusBalance  = Number(this.calculateTotalClaimBonus());
+  let allocatedOdin = (baseBalance + bonusBalance) * 2.5;
+
+  return Number(allocatedOdin.toFixed(8));
+});
+
+UserSchema.virtual('bonus_earlybird').get(function() {
+  return Number(this.calculateEarlyBirdBonus());
+});
+
+UserSchema.virtual('bonus_locked').get(function() {
+  return Number(this.calculateLockinBonus());
+});
+
 UserSchema.virtual('greeting').get(function() {
   return `Greetings ${this.name}!`;
 });

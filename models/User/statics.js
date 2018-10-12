@@ -44,6 +44,53 @@ module.exports = function(UserSchema) {
     return 'ODIN' + foo;
   }
 
+  UserSchema.statics.UpdateUserProperty = function(email, property) {
+    if (!email) return reject(new Error('User update failed, missing email'));
+    if (!property) return reject(new Error('User update failed, missing poperties'));
+  
+    let User = this;
+    return new Promise((resolve, reject) => {
+      debug(`Updating User - user:${email}
+      Params:
+      ${JSON.stringify(property)}`);
+  
+      User.findOne({ email: email })
+      .exec((err, user) => {
+        if (err) return reject(err);
+        if (!user) return reject(new Error('user_not_found'));
+
+        let todos = [];
+        if (property.hasOwnProperty('claimStatus')) {
+          todos.push(user.updateClaimStatus(property.claimStatus));
+        }
+        else if (property.hasOwnProperty('identityStatus')) {
+          todos.push(user.updateIdentityStatus(property.identityStatus, true));
+        }
+        else if ( property.hasOwnProperty('tfaEnabled')) {
+          if (typeof property.tfaEnabled === 'string')
+            property.tfaEnabled = (property.tfaEnabled === 'true') ? true : false;
+          
+          if (user.tfa_enabled && property.tfaEnabled === false) {
+            todos.push(user.resetTFACode());
+          }
+        }
+        else if (property.hasOwnProperty('allowLateLock')) {
+          if (typeof property.allowLateLock === 'string')
+          property.allowLateLock = (property.allowLateLock === 'true') ? true : false
+          
+          todos.push(user.setLateLock(property.allowLateLock));
+        }
+
+        Promise.all(todos)
+        .then(() => {
+          console.log('DONE');
+          return resolve(true);
+        })
+        .catch(reject);
+      });
+    });
+  };
+
   UserSchema.statics.fetchLockedClaimTotals = function() {
     debug('Fetching user claim balances');
     let User = this;

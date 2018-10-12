@@ -43,7 +43,7 @@ db.connect(dbString)
 
     console.log(user);
 
-    user.updateClaimStatus(status)
+    user.updateIdentityStatus(status)
     .then((updated) => {
       if (!updated) {
         console.log(`Unable to update claim status for user: ${email}`);

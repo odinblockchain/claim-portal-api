@@ -146,7 +146,7 @@ module.exports.callback = (req, res, next) => {
     identity['remarks'] = processRejectionReason(req.body);
 
     // update the user associated to the identity
-    identity.user.updateClaimStatus(identity['identity_status'])
+    identity.user.updateIdentityStatus(identity['identity_status'])
     .then(() => {
 
       // update the identity check
@@ -550,7 +550,7 @@ module.exports.submitIdentity = (req, res, next) => {
 
           if (user.identity_status !== 'accepted') {
             debug(`User accepted but not updated!`);
-            return user.updateClaimStatus('accepted')
+            return user.updateIdentityStatus('accepted')
             .then((updated) => {
               return res.json({
                 status: 'error',

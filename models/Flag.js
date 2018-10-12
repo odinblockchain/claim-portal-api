@@ -1,6 +1,7 @@
 const mongoose  = require('mongoose');
 const Schema    = mongoose.Schema;
 const debug     = require('debug')('odin-portal:model:flag');
+const moment    = require('moment');
 
 /**
  * Schema for User Identities
@@ -31,6 +32,34 @@ const FlagSchema = new Schema({
 }, {
   timestamps: true
 });
+
+FlagSchema.statics.FindByUser = function(user) {
+  debug(`Pulling Flags - user:${user.claimId}`);
+
+  let Flag = this;
+  return new Promise((resolve, reject) => {
+
+    Flag.find({ user: user.claimId })
+    .sort({ createdAt: -1 })
+    .exec((err, flags) => {
+      if (err) return reject(err);
+      debug(`-- Found [${flags.length}] Flags - user:${user.claimId}`);
+      
+      if (!flags.length) return resolve(flags);
+
+      flags = flags.map(f => {
+        return {
+          id:     f._id,
+          type:   f.type,
+          reason: f.reason,
+          date:   moment(f.createdAt).format('YYYY-MM-DD HH:mm:ss')
+        }
+      });
+      
+      return resolve(flags);
+    });
+  });
+};
 
 FlagSchema.statics.findFlags = function(userId, type) {
   debug(`Searching For Flags - user:${userId}, type:${type}`);
