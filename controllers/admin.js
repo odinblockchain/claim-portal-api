@@ -148,6 +148,8 @@ module.exports.search = (req, res, next) => {
         return next(err);
       }
 
+      if (!_matchedUser) return res.json({ status: 'ok', result: false });
+
       let pulledDetails = [];
       pulledDetails.push(Flag.FindByUser(_matchedUser));
       pulledDetails.push(Withdraw.FindByUser(_matchedUser));
