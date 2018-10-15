@@ -138,7 +138,8 @@ module.exports.search = (req, res, next) => {
     if (!searchEmail)
       return res.json({ status: 'ok', result: false });
 
-    debug(`Search For User - ${searchEmail}`);
+    searchEmail = `${searchEmail}`.toLowerCase().trim();
+    debug(`Search For User - '${searchEmail}'`);
 
     User.findOne({ email: searchEmail })
     .exec((err, _matchedUser) => {
@@ -164,17 +165,18 @@ module.exports.search = (req, res, next) => {
         });
 
         _matchedUser = {
-          email: _matchedUser.email,
-          claimStatus: _matchedUser.claim_status,
-          identityStatus: _matchedUser.identity_status,
-          isBalanceLocked: _matchedUser.balance_locked,
-          lockedBalanceTotal: _matchedUser.balance_locked_sum,
-          totalClaim: _matchedUser.claim_calculated,
-          claimBalance: _matchedUser.claim_balance,
-          createdOn: moment(_matchedUser.created_at).format('YYYY-MM-DD HH:mm:ss'),
-          totalFlags: flags.length,
-          is2FAEnabled: _matchedUser.tfa_enabled,
-          isAllowLateLock: _matchedUser.allow_late_lock
+          email:                _matchedUser.email,
+          wallet:               _matchedUser.wallet,
+          claimStatus:          _matchedUser.claim_status,
+          identityStatus:       _matchedUser.identity_status,
+          isBalanceLocked:      _matchedUser.balance_locked,
+          lockedBalanceTotal:   _matchedUser.balance_locked_sum,
+          totalClaim:           _matchedUser.claim_calculated,
+          claimBalance:         _matchedUser.claim_balance,
+          createdOn:            moment(_matchedUser.created_at).format('YYYY-MM-DD HH:mm:ss'),
+          totalFlags:           flags.length,
+          is2FAEnabled:         _matchedUser.tfa_enabled,
+          isAllowLateLock:      _matchedUser.allow_late_lock
         };
 
         return res.json({

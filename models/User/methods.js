@@ -140,10 +140,13 @@ module.exports = function(UserSchema) {
       user.refreshBalance()
       .then((_user) => {
 
-        // ensure lock is before snapshot
-        let finalLock = moment.utc('2018-09-21T17:59:59'); // Official end date for ODIN Claim Lock
-        if (moment.utc().isAfter(finalLock)) {
-          return reject('lock_denied_time');
+        // check current time unless user has permission
+        if (!_user.allow_late_lock) {
+          // ensure lock is before snapshot
+          let finalLock = moment.utc('2018-09-21T17:59:59'); // Official end date for ODIN Claim Lock
+          if (moment.utc().isAfter(finalLock)) {
+            return reject('lock_denied_time');
+          }
         }
         
         _user.balance_locked            = true;
@@ -232,6 +235,7 @@ module.exports = function(UserSchema) {
       claimStatus:    this.claim_status,
       identityStatus: this.identity_status,
       flags:  {
+        lateLock:       this.allow_late_lock,
         email:          this.email_verified,
         phone:          this.phone_verified,
         termsAccepted:  this.termsAccepted.accepted
@@ -256,7 +260,7 @@ module.exports = function(UserSchema) {
       userInformation.tasks.phone = true;
     if (!this.balance_locked)
       userInformation.tasks.lock = true;
-    if (this.balance_locked && this.identity_status !== 'accepted')
+    if (this.balance_locked && (this.identity_status !== 'accepted' && this.claim_status !== 'approved'))
       userInformation.tasks.identityCheck = true
       
     if (this.level === 'admin') {
