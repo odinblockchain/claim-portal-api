@@ -527,6 +527,7 @@ module.exports.fetchWallet = (req, res, next) => {
   .exec( (err, _user) => {
     if (err) return next(err);
     if (!_user) return next(new Error('Unauthorized'));
+    if (!_user.balance_locked) return res.json({ status: 'error', message: 'Balance not locked' });
 
     let todos = [];
     if (!_user.claim_setup) todos.push(_user.setupWallet());

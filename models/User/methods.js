@@ -17,6 +17,7 @@ const Nexmo           = require('nexmo');
 const BlockedNumbers  = require('../../lib/blockedNumbers');
 const request         = require('request');;
 const Push            = mongoose.model('Push');
+const Snapshot        = require('../../data/snapshot.json');
 
 function generatePin(max) {
   if (typeof max === 'undefined') max = 4;
@@ -58,73 +59,104 @@ module.exports = function(UserSchema) {
         return resolve(user);
       }
 
-      http({ uri: `${settings.balanceApi}/${user.wallet}/balance`, json: true }, (err, response, body) => {
-        // debug('Pull Balance', {
-        //   error:    (err) ? err.message : '',
-        //   response: (response) ? response.statusCode : '',
-        //   body:     body
-        // });
+      if (!Snapshot || !Snapshot['addressList']) return resolve(user);
 
+      let addressSnapshot = Snapshot['addressList'].find((a) => !!(a.address === user.wallet));
+
+      let balance = 0;
+      if (addressSnapshot) balance = addressSnapshot.balance;
+
+      user.model('User').findOneAndUpdate({ _id: user._id }, {
+        $set: {
+          balance: balance
+        }
+      }, { new: true })
+      .exec((err, _user) => {
         if (err) {
-          debug('Unable to refresh balance');
-          Raven.captureException('Unable to pull address balance', {
+          debug('Unable to save new balance');
+          Raven.captureException('Unable to save address balance', {
             tags: { model: 'User' },
             extra: {
               error: err,
-              response: response,
               body: body
             }
           });
-          return resolve(user);
+          return resolve(_user);
         }
-
-        if (body && body.status !== 'ok')
-          return resolve(user);
-
-        // Track balance snapshots
-        let _previousBalance    = user.balance;
-        let _newBalance         = body.balance;
-        let _balanceDifference  = (Number(_previousBalance) - Number(_newBalance));
-
-        user.model('User').findOneAndUpdate({ _id: user._id }, {
-          $set: {
-            balance: body.balance
-          }
-        }, { new: true })
-        .exec((err, _user) => {
-          if (err) {
-            debug('Unable to save new balance');
-            Raven.captureException('Unable to save address balance', {
-              tags: { model: 'User' },
-              extra: {
-                error: err,
-                body: body
-              }
-            });
-            return resolve(_user);
-          }
-    
-          debug(`Saved Balance - user:${user._id}`);
-
-          if ( _balanceDifference >= 10000 ) {
-            Flag.addFlag(user._id, 'balanceRefresh', 'balance_removal', {
-              previousBalance: _previousBalance,
-              newBalance: _newBalance,
-              difference: _balanceDifference
-            })
-            .then((added) => {
-              resolve(_user);
-            })
-            .catch((err) => {
-              debug(`Unable to save flag for user:${user._id}`);
-              resolve(_user);
-            });
-          }
-          else {
-            return resolve(_user);
-          }
-        });
+  
+        debug(`Saved Balance - user:${user._id}`);
+        return resolve(_user);
       });
+
+      // http({ uri: `${settings.balanceApi}/${user.wallet}/balance`, json: true }, (err, response, body) => {
+      //   // debug('Pull Balance', {
+      //   //   error:    (err) ? err.message : '',
+      //   //   response: (response) ? response.statusCode : '',
+      //   //   body:     body
+      //   // });
+
+      //   if (err) {
+      //     debug('Unable to refresh balance');
+      //     Raven.captureException('Unable to pull address balance', {
+      //       tags: { model: 'User' },
+      //       extra: {
+      //         error: err,
+      //         response: response,
+      //         body: body
+      //       }
+      //     });
+      //     return resolve(user);
+      //   }
+
+      //   if (body && body.status !== 'ok')
+      //     return resolve(user);
+        
+      //   body.balance = 0.5;
+
+      //   // Track balance snapshots
+      //   let _previousBalance    = user.balance;
+      //   let _newBalance         = body.balance;
+      //   let _balanceDifference  = (Number(_previousBalance) - Number(_newBalance));
+
+      //   user.model('User').findOneAndUpdate({ _id: user._id }, {
+      //     $set: {
+      //       balance: body.balance
+      //     }
+      //   }, { new: true })
+      //   .exec((err, _user) => {
+      //     if (err) {
+      //       debug('Unable to save new balance');
+      //       Raven.captureException('Unable to save address balance', {
+      //         tags: { model: 'User' },
+      //         extra: {
+      //           error: err,
+      //           body: body
+      //         }
+      //       });
+      //       return resolve(_user);
+      //     }
+    
+      //     debug(`Saved Balance - user:${user._id}`);
+
+      //     if ( _balanceDifference >= 10000 ) {
+      //       Flag.addFlag(user._id, 'balanceRefresh', 'balance_removal', {
+      //         previousBalance: _previousBalance,
+      //         newBalance: _newBalance,
+      //         difference: _balanceDifference
+      //       })
+      //       .then((added) => {
+      //         resolve(_user);
+      //       })
+      //       .catch((err) => {
+      //         debug(`Unable to save flag for user:${user._id}`);
+      //         resolve(_user);
+      //       });
+      //     }
+      //     else {
+      //       return resolve(_user);
+      //     }
+      //   });
+      // });
     });
   }
 
